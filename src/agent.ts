@@ -1,18 +1,18 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import type { Options } from '@anthropic-ai/claude-agent-sdk';
 
-export const MCP_SERVER_NAME = "payments-toolkit-mcp";
+export const MCP_SERVER_NAME = 'payments-toolkit-mcp';
 
 const TOOL_NAMES = [
-  "validate_card_number",
-  "detect_card_type",
-  "validate_iban",
+  'validate_card_number',
+  'detect_card_type',
+  'validate_iban',
 ] as const;
 
-const RESOURCE_NAMES = ["card_networks"] as const;
+const RESOURCE_NAMES = ['card_networks'] as const;
 
-const PROMPT_NAMES = ["check_payment_details"] as const;
+const PROMPT_NAMES = ['check_payment_details'] as const;
 
 export const QUALIFIED_TOOL_NAMES = TOOL_NAMES.map(
   (name) => `mcp__${MCP_SERVER_NAME}__${name}`,
@@ -45,16 +45,20 @@ function warnIfMissing(
   expectedNames: readonly string[],
   actual: readonly { name: string }[],
 ): void {
-  const missing = expectedNames.filter((name) => !actual.some((item) => item.name === name));
+  const missing = expectedNames.filter(
+    (name) => !actual.some((item) => item.name === name),
+  );
   if (missing.length > 0) {
-    console.error(`[boot] WARNING: expected ${label} not found on server: ${missing.join(", ")}`);
+    console.error(
+      `[boot] WARNING: expected ${label} not found on server: ${missing.join(', ')}`,
+    );
   }
 }
 
 export function getMcpServerPath(): string {
   const path = process.env.MCP_SERVER_PATH;
   if (!path) {
-    throw new Error("MCP_SERVER_PATH is not set.");
+    throw new Error('MCP_SERVER_PATH is not set.');
   }
   return path;
 }
@@ -64,8 +68,8 @@ export function buildAgentOptions(mcpServerPath: string): Options {
     systemPrompt: SYSTEM_PROMPT,
     mcpServers: {
       [MCP_SERVER_NAME]: {
-        type: "stdio",
-        command: "node",
+        type: 'stdio',
+        command: 'node',
         args: [mcpServerPath],
       },
     },
@@ -81,11 +85,11 @@ export function buildAgentOptions(mcpServerPath: string): Options {
  */
 export async function discoverMcpServer(mcpServerPath: string): Promise<void> {
   const client = new Client({
-    name: "payments-toolkit-agent-boot-check",
-    version: "0.1.0",
+    name: 'payments-toolkit-agent-boot-check',
+    version: '0.1.0',
   });
   const transport = new StdioClientTransport({
-    command: "node",
+    command: 'node',
     args: [mcpServerPath],
   });
 
@@ -97,14 +101,14 @@ export async function discoverMcpServer(mcpServerPath: string): Promise<void> {
     const { prompts } = await client.listPrompts();
 
     console.error(
-      `[boot] connected to ${MCP_SERVER_NAME}: tools=[${tools.map((t) => t.name).join(", ")}] ` +
-        `resources=[${resources.map((r) => r.name).join(", ")}] ` +
-        `prompts=[${prompts.map((p) => p.name).join(", ")}]`,
+      `[boot] connected to ${MCP_SERVER_NAME}: tools=[${tools.map((t) => t.name).join(', ')}] ` +
+        `resources=[${resources.map((r) => r.name).join(', ')}] ` +
+        `prompts=[${prompts.map((p) => p.name).join(', ')}]`,
     );
 
-    warnIfMissing("tools", TOOL_NAMES, tools);
-    warnIfMissing("resources", RESOURCE_NAMES, resources);
-    warnIfMissing("prompts", PROMPT_NAMES, prompts);
+    warnIfMissing('tools', TOOL_NAMES, tools);
+    warnIfMissing('resources', RESOURCE_NAMES, resources);
+    warnIfMissing('prompts', PROMPT_NAMES, prompts);
   } finally {
     await client.close();
   }
