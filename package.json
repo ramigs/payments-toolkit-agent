@@ -1,7 +1,7 @@
 {
   "name": "payments-toolkit-agent",
   "version": "0.1.0",
-  "description": "Agent backend, built with the Claude Agent SDK, exposing payments-toolkit-mcp as a conversational interface.",
+  "description": "Agent backend, built with Google ADK, exposing payments-toolkit-mcp as a conversational interface.",
   "type": "module",
   "engines": {
     "node": ">=18.0.0"
