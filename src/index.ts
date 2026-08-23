@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { EventType, InMemoryRunner, toStructuredEvents } from '@google/adk';
 import { buildAgent, discoverMcpServer, getMcpServerPath } from './agent.js';
+import { createRunLogger, logToolCall, logToolResult } from './logging.js';
 
 async function readStdin(): Promise<string> {
   let data = '';
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
   });
 
   let finalText = '';
+  const runLog = createRunLogger();
 
   try {
     for await (const event of runner.runEphemeral({
@@ -51,10 +53,20 @@ async function main(): Promise<void> {
           case EventType.TOOL_CALL:
             console.log(`\n[tool call] ${structured.call.name}`);
             console.log(`  args: ${JSON.stringify(structured.call.args)}`);
+            logToolCall(
+              runLog,
+              structured.call.name ?? 'unknown',
+              structured.call.args,
+            );
             break;
           case EventType.TOOL_RESULT:
             console.log(
               `[tool result] ${structured.result.name}: ${JSON.stringify(structured.result.response)}`,
+            );
+            logToolResult(
+              runLog,
+              structured.result.name ?? 'unknown',
+              structured.result.response,
             );
             break;
           case EventType.CONTENT:

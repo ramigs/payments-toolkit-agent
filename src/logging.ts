@@ -1,0 +1,65 @@
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
+import pino from 'pino';
+
+const LOG_DIR = path.join(process.cwd(), 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'agent.log');
+
+if (!existsSync(LOG_DIR)) {
+  mkdirSync(LOG_DIR, { recursive: true });
+}
+
+const level = process.env.LOG_LEVEL ?? 'info';
+
+// Unlike the MCP server's logger (stderr, pretty-printed in dev for a human
+// watching the terminal), this one is read back by the eval script — so it
+// always writes plain JSON lines to a dedicated file, regardless of
+// NODE_ENV. Pipe it through `pino-pretty` (installed as a dev dependency)
+// to view it by hand: `tail -f logs/agent.log | pnpm exec pino-pretty`.
+const logger = pino({ level }, pino.destination(LOG_FILE));
+
+/**
+ * A logger scoped to one CLI invocation (one `pnpm start` call), so log
+ * lines from concurrent or historical runs in the same log file can be
+ * told apart.
+ */
+export function createRunLogger(): pino.Logger {
+  return logger.child({ invocationId: randomUUID() });
+}
+
+// All current tool arguments are sensitive payment identifiers (card
+// numbers, IBANs), so every string argument is masked to its last 4
+// characters rather than maintaining a per-field allowlist of sensitive
+// names — same approach as payments-toolkit-mcp's own tool-call logging.
+function maskArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const masked: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    masked[key] = typeof value === 'string' ? maskSensitive(value) : value;
+  }
+  return masked;
+}
+
+function maskSensitive(value: string): string {
+  if (value.length <= 4) return '*'.repeat(value.length);
+  return `${'*'.repeat(value.length - 4)}${value.slice(-4)}`;
+}
+
+export function logToolCall(
+  log: pino.Logger,
+  name: string,
+  args: Record<string, unknown> | undefined,
+): void {
+  log.info({ target: name, args: maskArgs(args ?? {}) }, 'tool call started');
+}
+
+// The tool's raw result never contains the original card number/IBAN — our
+// three tools return only a verdict (valid/network/country) — so it's
+// logged as-is, unlike the arguments.
+export function logToolResult(
+  log: pino.Logger,
+  name: string,
+  result: unknown,
+): void {
+  log.info({ target: name, result }, 'tool call finished');
+}

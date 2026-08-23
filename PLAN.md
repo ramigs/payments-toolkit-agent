@@ -98,6 +98,15 @@ discipline from the MCP server)
   behavior, and it's also the first piece of the "production-minded, not
   demo-ware" case discussed for the portfolio framing
 
+**Implementation note:** went with a dedicated local file
+(`logs/agent.log`, gitignored) rather than stderr, so the eval script in
+step 5 reads a clean stream instead of one interleaved with the MCP
+child process's own stderr logs. This is a deliberate departure from
+the usual "log to stdout/stderr, let the environment handle routing"
+convention (which is what `payments-toolkit-mcp`'s own logger correctly
+does) — it only makes sense while this agent is a one-shot CLI script
+with a colocated reader. See the matching fast-follow below.
+
 ### 5. Build a small scenario-based eval set
 
 This is agent-level eval, distinct from the MCP server's own unit tests —
@@ -140,6 +149,13 @@ it tests tool _selection_ and _usage_, not tool correctness.
   progress instead of only a final CLI printout
 - A Vue/Nuxt frontend (via TanStack AI's Vue client) consuming the AG-UI
   stream — the actual demoable, client-facing piece
+- Revisit the agent's logging destination (`src/logging.ts`) once this
+  backend becomes a long-lived HTTP service rather than a one-shot CLI —
+  at that point it should switch from writing to `logs/agent.log` back
+  to stdout/stderr, matching the MCP server's convention and the usual
+  "app emits a stream, the environment routes it" practice, with the
+  eval script (or whatever observability tooling exists by then)
+  capturing that stream directly instead of reading a file
 
 ## Definition of done for this iteration
 
