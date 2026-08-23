@@ -65,6 +65,7 @@ export function getMcpServerPath(): string {
 
 export function buildAgentOptions(mcpServerPath: string): Options {
   return {
+    model: 'claude-haiku-4-5',
     systemPrompt: SYSTEM_PROMPT,
     mcpServers: {
       [MCP_SERVER_NAME]: {
