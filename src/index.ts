@@ -1,10 +1,6 @@
 import 'dotenv/config';
-import { query } from '@anthropic-ai/claude-agent-sdk';
-import {
-  buildAgentOptions,
-  discoverMcpServer,
-  getMcpServerPath,
-} from './agent.js';
+import { EventType, InMemoryRunner, toStructuredEvents } from '@google/adk';
+import { buildAgent, discoverMcpServer, getMcpServerPath } from './agent.js';
 
 async function readStdin(): Promise<string> {
   let data = '';
@@ -20,25 +16,11 @@ async function getPrompt(): Promise<string> {
   return argPrompt || readStdin();
 }
 
-function extractResultText(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((block) =>
-        block && typeof block === 'object' && 'text' in block
-          ? String((block as { text: unknown }).text)
-          : JSON.stringify(block),
-      )
-      .join('\n');
-  }
-  return JSON.stringify(content);
-}
-
 async function main(): Promise<void> {
   const mcpServerPath = getMcpServerPath();
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     throw new Error(
-      'ANTHROPIC_API_KEY is not set. Copy .env.example to .env and set it.',
+      'GEMINI_API_KEY is not set. Copy .env.example to .env and set it.',
     );
   }
 
@@ -51,42 +33,47 @@ async function main(): Promise<void> {
     );
   }
 
-  const pendingCalls = new Map<string, { name: string; input: unknown }>();
+  const { agent, mcpToolset } = buildAgent(mcpServerPath);
+  const runner = new InMemoryRunner({
+    agent,
+    appName: 'payments-toolkit-agent',
+  });
 
-  for await (const message of query({
-    prompt,
-    options: buildAgentOptions(mcpServerPath),
-  })) {
-    if (message.type === 'assistant') {
-      for (const block of message.message.content) {
-        if (block.type === 'tool_use') {
-          pendingCalls.set(block.id, { name: block.name, input: block.input });
-          console.log(`\n[tool call] ${block.name}`);
-          console.log(`  args: ${JSON.stringify(block.input)}`);
-        }
-      }
-    } else if (message.type === 'user') {
-      const content = message.message.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type === 'tool_result') {
-            const call = pendingCalls.get(block.tool_use_id);
-            const label = call?.name ?? block.tool_use_id;
+  let finalText = '';
+
+  try {
+    for await (const event of runner.runEphemeral({
+      userId: 'cli-user',
+      newMessage: { parts: [{ text: prompt }] },
+    })) {
+      for (const structured of toStructuredEvents(event)) {
+        switch (structured.type) {
+          case EventType.TOOL_CALL:
+            console.log(`\n[tool call] ${structured.call.name}`);
+            console.log(`  args: ${JSON.stringify(structured.call.args)}`);
+            break;
+          case EventType.TOOL_RESULT:
             console.log(
-              `[tool result] ${label}: ${extractResultText(block.content)}`,
+              `[tool result] ${structured.result.name}: ${JSON.stringify(structured.result.response)}`,
             );
-          }
+            break;
+          case EventType.CONTENT:
+            finalText += structured.content;
+            break;
+          case EventType.ERROR:
+            console.error(`\n[error] ${structured.error.message}`);
+            process.exitCode = 1;
+            break;
+          default:
+            break;
         }
-      }
-    } else if (message.type === 'result') {
-      if (message.subtype === 'success') {
-        console.log(`\n[response]\n${message.result}`);
-      } else {
-        console.error(`\n[error] ${message.subtype}`);
-        process.exitCode = 1;
       }
     }
+  } finally {
+    await mcpToolset.close();
   }
+
+  console.log(`\n[response]\n${finalText}`);
 }
 
 main().catch((error) => {

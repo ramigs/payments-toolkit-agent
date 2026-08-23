@@ -1,8 +1,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import type { Options } from '@anthropic-ai/claude-agent-sdk';
+import { LlmAgent, MCPToolset } from '@google/adk';
 
-export const MCP_SERVER_NAME = 'payments-toolkit-mcp';
+const MCP_SERVER_NAME = 'payments-toolkit-mcp';
 
 const TOOL_NAMES = [
   'validate_card_number',
@@ -14,9 +14,7 @@ const RESOURCE_NAMES = ['card_networks'] as const;
 
 const PROMPT_NAMES = ['check_payment_details'] as const;
 
-export const QUALIFIED_TOOL_NAMES = TOOL_NAMES.map(
-  (name) => `mcp__${MCP_SERVER_NAME}__${name}`,
-);
+const ADK_MODEL = 'gemini-3.5-flash-lite';
 
 const SYSTEM_PROMPT = `You are a narrow payments-validation assistant. Your only job is to help
 users validate payment details using the tools available to you:
@@ -63,24 +61,33 @@ export function getMcpServerPath(): string {
   return path;
 }
 
-export function buildAgentOptions(mcpServerPath: string): Options {
-  return {
-    model: 'claude-haiku-4-5',
-    systemPrompt: SYSTEM_PROMPT,
-    mcpServers: {
-      [MCP_SERVER_NAME]: {
-        type: 'stdio',
+export function buildAgent(mcpServerPath: string): {
+  agent: LlmAgent;
+  mcpToolset: MCPToolset;
+} {
+  const mcpToolset = new MCPToolset(
+    {
+      type: 'StdioConnectionParams',
+      serverParams: {
         command: 'node',
         args: [mcpServerPath],
       },
     },
-    tools: QUALIFIED_TOOL_NAMES,
-    allowedTools: QUALIFIED_TOOL_NAMES,
-  };
+    [...TOOL_NAMES],
+  );
+
+  const agent = new LlmAgent({
+    name: 'payments_toolkit_agent',
+    model: ADK_MODEL,
+    instruction: SYSTEM_PROMPT,
+    tools: [mcpToolset],
+  });
+
+  return { agent, mcpToolset };
 }
 
 /**
- * Connects to the MCP server directly (independent of the agent SDK's own
+ * Connects to the MCP server directly (independent of the ADK agent's own
  * connection) to confirm it exposes exactly what this agent expects, and
  * logs what was discovered. Run once at boot as a sanity check.
  */
