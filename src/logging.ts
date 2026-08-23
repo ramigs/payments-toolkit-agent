@@ -32,7 +32,9 @@ export function createRunLogger(): pino.Logger {
 // numbers, IBANs), so every string argument is masked to its last 4
 // characters rather than maintaining a per-field allowlist of sensitive
 // names — same approach as payments-toolkit-mcp's own tool-call logging.
-function maskArgs(args: Record<string, unknown>): Record<string, unknown> {
+export function maskArgs(
+  args: Record<string, unknown>,
+): Record<string, unknown> {
   const masked: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(args)) {
     masked[key] = typeof value === 'string' ? maskSensitive(value) : value;

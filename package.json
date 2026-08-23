@@ -11,7 +11,10 @@
     "start": "tsx src/index.ts",
     "build": "tsc",
     "eval": "tsx eval/run-eval.ts",
-    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -29,6 +32,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.9.1",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.9.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.11.0",
@@ -36,6 +40,7 @@
     "prettier": "^3.9.6",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.67.0"
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.11"
   }
 }
