@@ -1,6 +1,6 @@
 # PLAN: payments-toolkit-agent
 
-A minimal agent backend, built with the Claude Agent SDK, that connects to
+A minimal agent backend, built with the Google ADK, that connects to
 the existing [payments-toolkit-mcp](https://github.com/ramigs/payments-toolkit-mcp)
 server and exposes it as a conversational interface. This is a companion
 project — the MCP server stays untouched; this repo just adds an agent
@@ -15,8 +15,9 @@ project) will add an AG-UI-based frontend on top of this backend.
 
 ## Non-goals (for this iteration)
 
-- No frontend yet — this phase is backend/CLI only, verified via terminal
-  output and logs.
+- No frontend yet — this phase is backend only (CLI + HTTP/SSE for a
+  future frontend to consume), verified via terminal output, curl, and
+  logs.
 - No new MCP tools — reuse the three existing ones (`validate_card_number`,
   `detect_card_type`, `validate_iban`) as-is.
 - No production deployment — local-first, Node process.
@@ -29,8 +30,8 @@ project) will add an AG-UI-based frontend on top of this backend.
 - pnpm
 - `payments-toolkit-mcp` built and runnable locally (`pnpm run build` in
   that repo)
-- An Anthropic API key (`ANTHROPIC_API_KEY`)
-- `@anthropic-ai/claude-agent-sdk` (TypeScript)
+- A Gemini API key (`GEMINI_API_KEY`)
+- `@google/adk` (TypeScript)
 
 ## Project structure
 
@@ -38,6 +39,7 @@ project) will add an AG-UI-based frontend on top of this backend.
 payments-toolkit-agent/
   src/
     index.ts              # entry point: runs a single-turn or REPL-style agent session
+    http.ts                # entry point: long-lived HTTP server, POST /chat over SSE (see Step 7)
     agent.ts              # agent definition: system prompt, MCP server registration
     logging.ts            # structured logging for tool calls (see Step 4)
   eval/
@@ -53,14 +55,19 @@ payments-toolkit-agent/
 
 ### 1. Scaffold the project
 
-- `pnpm init`, add TypeScript, `@anthropic-ai/claude-agent-sdk`, `dotenv`
+- `pnpm init`, add TypeScript, `@google/adk`, `dotenv`
 - Copy the `.nvmrc` convention from `payments-toolkit-mcp` for consistency
-- Add `ANTHROPIC_API_KEY` via `.env` (gitignored), with a `.env.example`
+- Add `GEMINI_API_KEY` via `.env` (gitignored), with a `.env.example`
   committed
+
+**Implementation note:** started against `@anthropic-ai/claude-agent-sdk`,
+then switched to `@google/adk` shortly after (an MCP-native choice, and
+the one the AG-UI/frontend brainstorming in step 7 also builds on) — the
+rest of this plan reflects the ADK version throughout.
 
 ### 2. Register the MCP server with the agent
 
-- Point the Claude Agent SDK at `payments-toolkit-mcp` as an MCP server
+- Point the Google ADK at `payments-toolkit-mcp` as an MCP server
   connection — start with **stdio transport**, spawning the built MCP
   server as a child process (`node /path/to/payments-toolkit-mcp/dist/index.js`),
   matching the same connection method already documented for Claude Code
@@ -173,17 +180,92 @@ it tests tool _selection_ and _usage_, not tool correctness.
 - Note the intentional scope boundaries (no frontend, no guardrails yet)
   so it reads as a deliberate first iteration, not an unfinished attempt
 
+### 7. Add an HTTP+SSE endpoint for the future frontend
+
+This is the API layer the step-2 frontend project will actually talk to —
+until now, this backend was only reachable via CLI. Decided ahead of time
+(see the brainstorming doc that seeded this step):
+
+- **Single-turn, not session-aware.** One `POST /chat` runs one
+  `runEphemeral()` agent turn and streams its events back — no
+  conversation history kept between requests. Mirrors what `src/index.ts`
+  already does, just over HTTP instead of argv/stdin. Multi-turn session
+  state (a session id, a history store) is real added complexity that the
+  frontend project may not even need on day one — deferred until it's
+  known to be needed, not built ahead of it.
+- **This repo's own simple SSE event shapes for now, not the official AG-UI
+  protocol schema.** `tool_call` / `tool_result` / `content` / `error` /
+  `done` events, a near-direct reuse of `src/trace.ts`'s existing
+  `describeEvent` mapping. AG-UI standardizes the event _shape_, not the
+  transport (SSE/WebSocket/etc. are all valid AG-UI transports) — so
+  "stream events over SSE" and "shape those events as AG-UI" are separable
+  decisions. Adopting the official `ag-ui-protocol` ADK integration is
+  deferred until the frontend project is actually being built and needs to
+  consume them, rather than guessing at the right shape now with no
+  consumer to validate against.
+- **Hono** (`hono` + `@hono/node-server`) for the HTTP layer — lightweight,
+  TypeScript-first, and has a built-in SSE streaming helper
+  (`hono/streaming`), which suits a single small endpoint better than
+  Express's more manual SSE plumbing (Express was the other candidate,
+  for consistency with `payments-toolkit-mcp`'s own HTTP transport).
+
+Implementation (`src/http.ts`):
+
+- The agent, MCP connection (child process), and ADK `InMemoryRunner` are
+  built **once** at server startup and reused across every request —
+  unlike the CLI, which builds fresh per invocation since it exits after
+  one turn. `SIGINT`/`SIGTERM` close the MCP connection before exit.
+- `POST /chat` takes `{ "prompt": string }`, returns `400` on missing/
+  invalid JSON or an empty prompt, otherwise streams SSE events reusing
+  the exact same `describeEvent`/`logToolCall`/`logToolResult` pipeline
+  the CLI and eval runner already share — one source of truth for "what
+  happened," now three consumers (CLI stdout, `logs/agent.log`, and this
+  SSE stream).
+- `PORT` env var, default `3001` (payments-toolkit-mcp's own
+  `start:http` defaults to `3000`, so both can run at once unset).
+- Verified end-to-end with a real request (`curl -N`): correct SSE
+  framing, correct tool call, correct result, correct final answer, and a
+  confirmed graceful shutdown on `SIGTERM`.
+
 ## Fast-follows (explicitly out of scope for this PLAN, tracked for later)
 
-- HTTP transport for the MCP connection (matching the MCP server's
-  existing `start:http` mode), so the agent backend can run as a
-  long-lived service rather than spawning a child process per session
+- Switch the MCP connection itself (not this agent's own HTTP API — see
+  step 7) from spawning `payments-toolkit-mcp` as a stdio child process to
+  connecting over that server's own `start:http` transport instead
 - Basic guardrails: spend/scope limits, input redaction before logging,
   explicit refusal handling for out-of-scope requests
-- AG-UI event streaming layer, so a frontend can show live tool-call
-  progress instead of only a final CLI printout
+- Shape `src/http.ts`'s SSE stream as real AG-UI protocol events, in place
+  of the simple custom event shapes it emits for now (see step 7).
+  **Investigated, not just deferred:** there is no official ADK↔AG-UI
+  bridge for TypeScript — only Python's `ag_ui_adk` package (confirmed via
+  [ag-ui-protocol/ag-ui#874](https://github.com/ag-ui-protocol/ag-ui/issues/874),
+  a feature request for exactly this, closed unresolved; the person who
+  closed it found only an unrelated A2A-protocol workaround, and the
+  Python bridge's own maintainer commented on the same thread that he
+  hasn't found a way to connect `adk-js` either and is considering
+  building one himself). CopilotKit's own `docs.copilotkit.ai/google-adk`
+  quickstart isn't a different path — its starter repo
+  (`copilotkit/with-adk`) confirmed the agent side is Python
+  (`agent/main.py`, `pyproject.toml`), same bridge. Converting this whole
+  project to Python to get the bridge for free was also considered and
+  rejected — disproportionate (discards the whole working TS backend:
+  eval suite, HTTP server, logging, all verified) for one library, and
+  fragments the TS frontend/MCP/agent story this project is going for.
+  Decided plan for when the frontend project actually needs this:
+  install `@ag-ui/core` for its official TypeScript event types, and
+  write the ADK-event → AG-UI-event mapping ourselves against the public
+  AG-UI protocol spec (not by porting `ag_ui_adk`'s Python source, which
+  would be a murkier kind of copying) — a contained change to the part of
+  `src/http.ts` that currently turns `describeEvent`'s output into SSE
+  messages, nothing upstream. Build it against the real frontend once one
+  exists (AG-UI is pre-1.0 and still evolving; not worth guessing exact
+  event boundaries with no consumer to validate against), and check
+  first whether a real TS bridge has since shipped.
 - A Vue/Nuxt frontend (via TanStack AI's Vue client) consuming the AG-UI
   stream — the actual demoable, client-facing piece
+- Multi-turn session state for `POST /chat` (session id, history store),
+  if the frontend project turns out to need it
+- A visible cancel/interrupt control for an in-flight agent turn
 - Revisit the agent's logging destination (`src/logging.ts`) once this
   backend becomes a long-lived HTTP service rather than a one-shot CLI —
   at that point it should switch from writing to `logs/agent.log` back
@@ -202,5 +284,8 @@ it tests tool _selection_ and _usage_, not tool correctness.
   server and prints a clear tool-call trace + final answer
 - `pnpm run eval` runs the scenario set and reports pass/fail per
   scenario
+- `pnpm run start:http` exposes `POST /chat` and streams SSE tool-call/
+  content/error events for a full agent turn, verified against a real
+  request
 - README explains setup and scope clearly enough that a stranger (or a
   future you) could pick this up cold

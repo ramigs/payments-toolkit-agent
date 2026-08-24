@@ -7,10 +7,10 @@ companion project — the MCP server stays untouched; this repo just adds an
 agent layer on top of it. See [PLAN.md](./PLAN.md) for the full step-by-step
 walkthrough, including the reasoning behind each design decision.
 
-This is step 1 of 2: a local, CLI-only backend that proves out the full
-loop (user request → agent reasoning → MCP tool call → tool result → agent
-response) with visibility into each step. Step 2 (a separate project) adds
-an AG-UI-based frontend on top of this backend.
+This is step 1 of 2: a local backend (CLI and HTTP+SSE) that proves out the
+full loop (user request → agent reasoning → MCP tool call → tool result →
+agent response) with visibility into each step. Step 2 (a separate project)
+adds an AG-UI-based frontend on top of this backend's HTTP endpoint.
 
 ## Prerequisites
 
@@ -65,6 +65,51 @@ This log is for human/audit observability — the eval suite below does
 **not** read it, since the masking would hide argument details some
 scenarios need to check (see `eval/run-eval.ts`).
 
+## HTTP server
+
+Run the agent as a long-lived HTTP server instead of a one-shot CLI call:
+
+```bash
+pnpm run start:http
+```
+
+Listens on `PORT` (default `3001`) and exposes one endpoint:
+
+```
+POST /chat
+Content-Type: application/json
+
+{ "prompt": "Is DE89370400440532013000 a valid IBAN?" }
+```
+
+The response is a Server-Sent Events stream — one full agent turn per
+request, no conversation state kept between requests (the frontend project
+is responsible for session/thread identity if it needs multi-turn memory).
+Each event mirrors what the CLI trace prints, so a client sees the same
+tool-call visibility:
+
+```
+event: tool_call
+data: {"name":"validate_iban","args":{"iban":"DE89370400440532013000"}}
+
+event: tool_result
+data: {"name":"validate_iban","result":{...}}
+
+event: content
+data: {"text":"Yes, DE89370400440532013000 is a valid IBAN (country: Germany)."}
+
+event: done
+data: {}
+```
+
+An `event: error` with `{"message": "..."}` can appear instead of/alongside
+`content` if a tool call fails. These are this repo's own event shapes, not
+yet the official AG-UI protocol schema — see the "Scope" section below.
+
+The MCP connection (one child process, spawned once at server startup) and
+the tool-call audit log (`logs/agent.log`, same masking as the CLI) are
+shared across all requests, unlike the CLI which reconnects per invocation.
+
 ## Eval suite
 
 `payments-toolkit-agent`'s behavior — which tool it picks, what arguments
@@ -114,6 +159,7 @@ eval suite above, which checks the agent's own decisions.
 ```
 src/
   index.ts       # entry point: single-turn CLI runner
+  http.ts        # entry point: long-lived HTTP server, POST /chat over SSE
   agent.ts       # agent definition: system prompt, MCP server registration
   trace.ts       # maps one ADK structured event to CLI output / log input
   logging.ts     # structured, redacted tool-call logging (logs/agent.log)
@@ -129,12 +175,21 @@ tests/unit/       # unit tests for src/, mirrored 1:1
 
 This is a deliberate first iteration, not an unfinished one:
 
-- No frontend yet — backend/CLI only, verified via terminal output and logs
+- No frontend yet — backend only (CLI + HTTP/SSE), verified via terminal
+  output, curl, and logs
 - No new MCP tools — reuses the three existing ones as-is
 - No production deployment — local-first, spawns the MCP server as a child
   process over stdio
 - No auth/guardrail system yet
+- The HTTP server's SSE events are this repo's own simple shapes
+  (`tool_call`/`tool_result`/`content`/`error`/`done`), not yet the official
+  AG-UI protocol schema — deferred until the frontend project actually
+  needs to consume them, per the ADK-specific `ag-ui-protocol/ag-ui`
+  integration rather than a hand-rolled one
+- No multi-turn session state — each `/chat` request is a single, isolated
+  agent turn
 
 See the "Fast-follows" section of [PLAN.md](./PLAN.md) for what's tracked
-for later (HTTP transport, guardrails, AG-UI streaming, a frontend, and
-revisiting the logging destination once this becomes a long-lived service).
+for later (MCP-connection-over-HTTP transport, guardrails, AG-UI-shaped
+events, a frontend, and revisiting the CLI's logging destination once it
+also becomes a long-lived service).

@@ -9,6 +9,7 @@
   "packageManager": "pnpm@10.20.0",
   "scripts": {
     "start": "tsx src/index.ts",
+    "start:http": "tsx src/http.ts",
     "build": "tsc",
     "eval": "tsx eval/run-eval.ts",
     "test": "vitest run",
@@ -25,8 +26,10 @@
   "license": "ISC",
   "dependencies": {
     "@google/adk": "^2.0.0",
+    "@hono/node-server": "^2.1.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "dotenv": "^17.2.3",
+    "hono": "^4.13.4",
     "pino": "^10.3.1"
   },
   "devDependencies": {
