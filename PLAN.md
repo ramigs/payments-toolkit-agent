@@ -94,18 +94,24 @@ discipline from the MCP server)
   tool's raw result
 - Log to `stderr` or a local file, not stdout, to keep the same hygiene
   as the MCP server's transport rules
-- This logging is what step 5's eval script reads to check agent
-  behavior, and it's also the first piece of the "production-minded, not
-  demo-ware" case discussed for the portfolio framing
+- This logging is the audit/observability trail for a human (or a future
+  log-shipping pipeline) to inspect after the fact — it's masked/redacted
+  by design, and it's also the first piece of the "production-minded, not
+  demo-ware" case discussed for the portfolio framing. It is **not** what
+  step 5's eval script reads: the eval runner captures the tool-call
+  trace in-process (see step 5), since the masking here would hide
+  exactly the argument detail (e.g. whether dashes were stripped from a
+  card number) that some eval scenarios need to check.
 
 **Implementation note:** went with a dedicated local file
-(`logs/agent.log`, gitignored) rather than stderr, so the eval script in
-step 5 reads a clean stream instead of one interleaved with the MCP
-child process's own stderr logs. This is a deliberate departure from
-the usual "log to stdout/stderr, let the environment handle routing"
-convention (which is what `payments-toolkit-mcp`'s own logger correctly
-does) — it only makes sense while this agent is a one-shot CLI script
-with a colocated reader. See the matching fast-follow below.
+(`logs/agent.log`, gitignored) rather than stderr, so a human tailing it
+(`tail -f logs/agent.log | pnpm exec pino-pretty`) sees a clean stream
+instead of one interleaved with the MCP child process's own stderr
+logs. This is a deliberate departure from the usual "log to
+stdout/stderr, let the environment handle routing" convention (which is
+what `payments-toolkit-mcp`'s own logger correctly does) — it only
+makes sense while this agent is a one-shot CLI script with a colocated
+reader. See the matching fast-follow below.
 
 ### 5. Build a small scenario-based eval set
 
@@ -124,11 +130,40 @@ it tests tool _selection_ and _usage_, not tool correctness.
     for clarification rather than guessing
   - A case where the underlying tool returns invalid → expects the agent
     to accurately relay "invalid," not soften or override it
-- `eval/run-eval.ts`: runs each scenario through the agent, checks actual
-  tool-call trace and response against the expected outcome, prints a
-  pass/fail summary
+  - Expectations are graded on independent axes per scenario rather than
+    a single pass/fail — `expectedTools`, `expectedArgs` (checked against
+    the real in-process args, e.g. verifying dashes were stripped before
+    the call), and `expectedResponse` (a heuristic check on the final
+    text, e.g. matches/doesn't-match a regex for "invalid" vs "valid").
+    Not every scenario needs all three (the weather scenario has no
+    `expectedArgs`, since it expects no call at all). Kept intentionally
+    simple for now — three typed fields checked independently, no
+    weighting/scoring system — but shaped so a 4th axis or richer checks
+    can be added later without a rewrite.
+  - Response-text grading uses heuristics (substring/regex), not an
+    LLM-as-judge — the scenario set is small and deliberately clear-cut
+    (a hard invalid/valid, an unambiguous decline, an unambiguous
+    clarifying question), so heuristics should hold up. If phrasing
+    variance makes them flaky in practice, upgrading just the
+    `expectedResponse` axis to an LLM judge is a fast-follow, not a
+    redesign.
+- `eval/run-eval.ts`: for each scenario, builds the agent and runs it
+  in-process (same `buildAgent`/`runner.runEphemeral`/`describeEvent`
+  pattern as `src/index.ts`), capturing the structured tool-call trace
+  and final response directly from the event stream — not by reading
+  `logs/agent.log`, since that log's argument masking would hide
+  argument-construction details some scenarios need to check. Checks the
+  captured trace and response against each scenario's expected outcome
+  per axis (tools / args / response) and prints a per-axis pass/fail
+  summary, so a wrong-tool failure and a mis-relayed-result failure are
+  distinguishable at a glance instead of collapsing into one red mark
 - Run this manually for now (`pnpm run eval`); wiring it into CI is a
   fast-follow, not required for the first working version
+- Each scenario runs once per eval invocation (a single sample from the
+  model's behavior, not a guaranteed-repeatable result). Kept simple
+  deliberately — repeated trials per scenario with a pass-rate instead
+  of a boolean is the fast-follow if flakiness shows up in practice or
+  once this is wired into CI, not something to build ahead of need
 
 ### 6. README pass
 
@@ -153,9 +188,13 @@ it tests tool _selection_ and _usage_, not tool correctness.
   backend becomes a long-lived HTTP service rather than a one-shot CLI —
   at that point it should switch from writing to `logs/agent.log` back
   to stdout/stderr, matching the MCP server's convention and the usual
-  "app emits a stream, the environment routes it" practice, with the
-  eval script (or whatever observability tooling exists by then)
-  capturing that stream directly instead of reading a file
+  "app emits a stream, the environment routes it" practice (this is
+  independent of the eval script, which captures its trace in-process
+  and was never reading this log — see step 5)
+- Eval hardening: repeated trials per scenario with a pass-rate instead
+  of a single run/boolean (see step 5), and upgrading the response-text
+  axis from heuristic checks to an LLM-as-judge if phrasing variance
+  makes heuristics flaky in practice
 
 ## Definition of done for this iteration
 
