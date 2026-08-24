@@ -114,7 +114,9 @@ async function main(): Promise<void> {
       const tools = gradeTools(scenario, toolCalls);
       const args = gradeArgs(scenario, toolCalls);
       const response = gradeResponse(scenario, finalText);
-      const overall = [tools, args, response].every((axis) => axis.status !== 'fail');
+      const overall = [tools, args, response].every(
+        (axis) => axis.status !== 'fail',
+      );
       if (!overall) failures += 1;
 
       console.log(
@@ -128,7 +130,9 @@ async function main(): Promise<void> {
     await mcpToolset.close();
   }
 
-  console.log(`\n${selected.length - failures}/${selected.length} scenarios passed`);
+  console.log(
+    `\n${selected.length - failures}/${selected.length} scenarios passed`,
+  );
   if (failures > 0) process.exitCode = 1;
 }
 

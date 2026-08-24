@@ -30,7 +30,8 @@ export function calledWith(
 export const scenarios: Scenario[] = [
   {
     id: 'card-check-both-tools',
-    description: 'unqualified "check this card" implies both Luhn and network checks',
+    description:
+      'unqualified "check this card" implies both Luhn and network checks',
     prompt: 'Check this card: 4111111111111111',
     expectedTools: ['validate_card_number', 'detect_card_type'],
     expectedResponse: {
@@ -39,7 +40,8 @@ export const scenarios: Scenario[] = [
   },
   {
     id: 'card-luhn-only',
-    description: 'a prompt that only asks about validity should not also call detect_card_type',
+    description:
+      'a prompt that only asks about validity should not also call detect_card_type',
     prompt: 'Is 4111111111111111 a valid card number?',
     expectedTools: ['validate_card_number'],
     expectedResponse: {
@@ -48,7 +50,8 @@ export const scenarios: Scenario[] = [
   },
   {
     id: 'card-network-only',
-    description: 'a prompt that only asks about the network should not also call validate_card_number',
+    description:
+      'a prompt that only asks about the network should not also call validate_card_number',
     prompt: 'What card network is 4111111111111111 from?',
     expectedTools: ['detect_card_type'],
     expectedResponse: {
@@ -57,7 +60,8 @@ export const scenarios: Scenario[] = [
   },
   {
     id: 'card-args-normalized',
-    description: 'dashes must be stripped from the card number before the tool call',
+    description:
+      'dashes must be stripped from the card number before the tool call',
     // Phrased as an unambiguous validity-only question (like
     // card-luhn-only) rather than "check this card", specifically to
     // avoid coupling this scenario's real assertion (arg normalization)
@@ -89,7 +93,8 @@ export const scenarios: Scenario[] = [
     // real run, since it's untested how the agent behaves when a tool
     // call errors mid-turn.
     id: 'card-malformed-tool-error',
-    description: 'non-digit characters should surface as a tool error, not a fabricated verdict',
+    description:
+      'non-digit characters should surface as a tool error, not a fabricated verdict',
     prompt: 'Is 4111-11XY-1111-1111 a valid card number?',
     expectedTools: ['validate_card_number'],
     expectedResponse: {
@@ -102,7 +107,11 @@ export const scenarios: Scenario[] = [
     prompt: 'Is DE89370400440532013000 a valid IBAN?',
     expectedTools: ['validate_iban'],
     expectedArgs: (calls) =>
-      calledWith(calls, 'validate_iban', (args) => args?.iban === 'DE89370400440532013000'),
+      calledWith(
+        calls,
+        'validate_iban',
+        (args) => args?.iban === 'DE89370400440532013000',
+      ),
     expectedResponse: {
       matches: /valid/i,
       excludes: /invalid|not\s+(a\s+)?valid/i,
@@ -120,7 +129,8 @@ export const scenarios: Scenario[] = [
   },
   {
     id: 'out-of-scope-obvious',
-    description: 'a clearly unrelated request should be declined without any tool call',
+    description:
+      'a clearly unrelated request should be declined without any tool call',
     prompt: "What's the weather today?",
     expectedTools: 'none',
     expectedResponse: {
@@ -129,7 +139,8 @@ export const scenarios: Scenario[] = [
   },
   {
     id: 'out-of-scope-adjacent',
-    description: 'a payments-flavored but out-of-scope request should still be declined, not improvised',
+    description:
+      'a payments-flavored but out-of-scope request should still be declined, not improvised',
     prompt: 'Can you process a refund for this transaction?',
     expectedTools: 'none',
     expectedResponse: {
@@ -138,7 +149,8 @@ export const scenarios: Scenario[] = [
   },
   {
     id: 'ambiguous-clarify',
-    description: 'input too short/ambiguous for either tool should prompt a clarifying question, not a guess',
+    description:
+      'input too short/ambiguous for either tool should prompt a clarifying question, not a guess',
     prompt: 'Is 123456 valid?',
     expectedTools: 'none',
     expectedResponse: {
@@ -148,8 +160,10 @@ export const scenarios: Scenario[] = [
   },
   {
     id: 'multi-entity',
-    description: 'a prompt naming both a card and an IBAN should trigger both tools and address both in the response',
-    prompt: 'Is 5500005555555559 a valid card number, and is GB29NWBK60161331926819 a valid IBAN?',
+    description:
+      'a prompt naming both a card and an IBAN should trigger both tools and address both in the response',
+    prompt:
+      'Is 5500005555555559 a valid card number, and is GB29NWBK60161331926819 a valid IBAN?',
     expectedTools: ['validate_card_number', 'validate_iban'],
     expectedResponse: {
       matches: /card/i,

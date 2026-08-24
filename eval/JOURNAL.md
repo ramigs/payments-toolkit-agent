@@ -69,8 +69,8 @@ for) the whole suite. Verified against just `card-luhn-only` and
 ### Bug found: in the eval harness itself, not the agent
 
 `card-invalid-fidelity`'s response regex was `/invalid|not valid|fails/i`.
-Actual agent response: *"No, 4111111111111112 is not a valid card
-number."* — contains "not **a** valid", not the literal substring "not
+Actual agent response: _"No, 4111111111111112 is not a valid card
+number."_ — contains "not **a** valid", not the literal substring "not
 valid", so the regex missed a correct response. A concrete instance of
 the heuristic-grading brittleness flagged as a known tradeoff when we
 chose regex checks over an LLM-judge for the response axis.
@@ -93,13 +93,13 @@ clearly malformed in a way the tools can't resolve... ask a clarifying
 question instead of guessing"). The rule existed; the model didn't apply
 it to "Is 123456 valid?" — it guessed card number and called
 `validate_card_number` anyway. The rule was true but vague: it never
-said *what* counts as ambiguous for this domain, so the model had to
+said _what_ counts as ambiguous for this domain, so the model had to
 infer a threshold on its own, and its inferred threshold was looser than
 intended.
 
 Fix: replaced the vague rule with a concrete, checkable one — spelling
 out that a value is ambiguous when the user doesn't say which type it
-is *and* the value itself doesn't clearly indicate one, with explicit
+is _and_ the value itself doesn't clearly indicate one, with explicit
 shape rules (card: 8-19 digits; IBAN: starts with 2 letters, ~15+
 chars). Same lesson as the tool-scoping fix earlier: a concrete,
 falsifiable rule outperforms a general instruction to "use good
