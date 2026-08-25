@@ -1,9 +1,13 @@
 import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import type { SSEStreamingApi } from 'hono/streaming';
 import { streamSSE } from 'hono/streaming';
 import { EventType, InMemoryRunner, toStructuredEvents } from '@google/adk';
+import { RunAgentInputSchema } from '@ag-ui/core';
 import { buildAgent, discoverMcpServer, getMcpServerPath } from './agent.js';
+import { AgUiTranslator, extractPrompt, type AgUiEvent } from './ag-ui.js';
 import { createRunLogger, logToolCall, logToolResult } from './logging.js';
 import { describeEvent } from './trace.js';
 
@@ -28,6 +32,26 @@ const runner = new InMemoryRunner({
 
 const app = new Hono();
 
+// The frontend (payments-toolkit-frontend, a separate localhost origin) is
+// the only real consumer of this endpoint (see that repo's PLAN.md, step
+// 2) — cross-origin requests are the norm here, not an edge case, and the
+// client's fetchServerSentEvents adapter sends a custom X-Run-Id header
+// that triggers a CORS preflight.
+app.use(
+  '/chat',
+  cors({
+    origin: '*',
+    allowMethods: ['POST', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'X-Run-Id'],
+  }),
+);
+
+async function emit(stream: SSEStreamingApi, ...events: AgUiEvent[]): Promise<void> {
+  for (const event of events) {
+    await stream.writeSSE({ data: JSON.stringify(event) });
+  }
+}
+
 app.post('/chat', async (c) => {
   let body: unknown;
   try {
@@ -36,22 +60,35 @@ app.post('/chat', async (c) => {
     return c.json({ error: 'Request body must be JSON.' }, 400);
   }
 
-  const prompt =
-    typeof body === 'object' && body !== null && 'prompt' in body
-      ? (body as { prompt: unknown }).prompt
-      : undefined;
-
-  if (typeof prompt !== 'string' || prompt.trim() === '') {
-    return c.json({ error: '"prompt" must be a non-empty string.' }, 400);
+  const parsed = RunAgentInputSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: 'Request body must be a valid AG-UI RunAgentInput.' },
+      400,
+    );
   }
+
+  const prompt = extractPrompt(parsed.data);
+  if (!prompt || prompt.trim() === '') {
+    return c.json(
+      { error: 'No non-empty "user" message found in "messages".' },
+      400,
+    );
+  }
+
+  const { threadId, runId } = parsed.data;
 
   // Single-turn: each request runs one ephemeral agent turn and streams its
   // events back, with no conversation state kept between requests (same
   // model as the CLI's one-shot pnpm start, just over HTTP).
   return streamSSE(c, async (stream) => {
     const runLog = createRunLogger();
+    const translator = new AgUiTranslator(threadId, runId);
+    let errored = false;
 
-    for await (const event of runner.runEphemeral({
+    await emit(stream, translator.runStarted(), ...translator.open());
+
+    outer: for await (const event of runner.runEphemeral({
       userId: 'http-user',
       newMessage: { parts: [{ text: prompt }] },
     })) {
@@ -60,10 +97,14 @@ app.post('/chat', async (c) => {
 
         if (outcome.toolCall) {
           logToolCall(runLog, outcome.toolCall.name, outcome.toolCall.args);
-          await stream.writeSSE({
-            event: 'tool_call',
-            data: JSON.stringify(outcome.toolCall),
-          });
+          await emit(
+            stream,
+            ...translator.toolCall(
+              outcome.toolCall.name,
+              outcome.toolCall.args,
+              outcome.toolCall.id,
+            ),
+          );
         }
         if (outcome.toolResult) {
           logToolResult(
@@ -71,27 +112,29 @@ app.post('/chat', async (c) => {
             outcome.toolResult.name,
             outcome.toolResult.result,
           );
-          await stream.writeSSE({
-            event: 'tool_result',
-            data: JSON.stringify(outcome.toolResult),
-          });
+          await emit(
+            stream,
+            translator.toolResult(
+              outcome.toolResult.name,
+              outcome.toolResult.result,
+              outcome.toolResult.id,
+            ),
+          );
         }
         if (outcome.contentDelta) {
-          await stream.writeSSE({
-            event: 'content',
-            data: JSON.stringify({ text: outcome.contentDelta }),
-          });
+          await emit(stream, ...translator.content(outcome.contentDelta));
         }
         if (structured.type === EventType.ERROR) {
-          await stream.writeSSE({
-            event: 'error',
-            data: JSON.stringify({ message: structured.error.message }),
-          });
+          errored = true;
+          await emit(stream, translator.runError(structured.error.message));
+          break outer;
         }
       }
     }
 
-    await stream.writeSSE({ event: 'done', data: '{}' });
+    if (!errored) {
+      await emit(stream, translator.runFinished());
+    }
   });
 });
 

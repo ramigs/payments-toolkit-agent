@@ -227,6 +227,60 @@ Implementation (`src/http.ts`):
   framing, correct tool call, correct result, correct final answer, and a
   confirmed graceful shutdown on `SIGTERM`.
 
+### 8. Real AG-UI protocol translator for `/chat`
+
+Done once `payments-toolkit-frontend` existed as a real consumer to
+validate against — per the plan below, install `@ag-ui/core` and write
+the mapping ourselves rather than porting `ag_ui_adk`'s Python source.
+No TS ADK↔AG-UI bridge had shipped since the investigation below (still
+just `ag_ui_adk`, Python-only).
+
+- Installed `@ag-ui/core` (`0.0.58`) for the official `EventType` enum,
+  `RunAgentInputSchema`, and the typed `*Event` shapes — used directly,
+  not re-derived by hand.
+- `/chat`'s request body is now an AG-UI `RunAgentInput`
+  (`{ threadId, runId, messages, ... }`), validated with
+  `RunAgentInputSchema.safeParse`, not the old `{ prompt }` shape — a
+  breaking change to the endpoint's contract, but it had no consumer
+  other than manual `curl` testing before this. `src/ag-ui.ts`'s
+  `extractPrompt()` pulls the prompt from the last `role: 'user'`
+  message, mirroring the frontend's `uiMessagesToWire` on the way in.
+- `src/ag-ui.ts`'s `AgUiTranslator` maps `describeEvent`'s existing
+  tool-call/tool-result/content outcomes to spec AG-UI events per run:
+  `RUN_STARTED` → `TOOL_CALL_START`/`ARGS`/`END` → `TOOL_CALL_RESULT` →
+  `TEXT_MESSAGE_START`/`CONTENT`/`END` → `RUN_FINISHED` (or `RUN_ERROR`,
+  terminal, in place of `RUN_FINISHED`). `trace.ts`'s `EventOutcome` grew
+  an optional `id` field on `toolCall`/`toolResult` (ADK's
+  `FunctionCall.id`/`FunctionResponse.id`) so results correlate to their
+  calls via AG-UI's `toolCallId` — additive, doesn't touch existing
+  fields, existing tests still pass unmodified.
+- **Reused the client-bug workaround discovered building the frontend
+  (see `payments-toolkit-frontend/PLAN.md`, "What we learned building
+  the backend"):** `@tanstack/ai@0.49.1`'s `StreamProcessor` drops the
+  first `TEXT_MESSAGE_CONTENT` delta when `TOOL_CALL_START` references a
+  message with no prior `TEXT_MESSAGE_START` — which is exactly this
+  backend's real event order (tool calls always precede the one final
+  content block; confirmed via direct event-dump against the live agent,
+  single- and multi-tool-call turns both). `AgUiTranslator.open()` emits
+  an empty `TEXT_MESSAGE_START`/`TEXT_MESSAGE_END` pair for the assistant
+  message before any tool call, same fix as the frontend's mock server.
+- **CORS**: `/chat` had none — the frontend is a different localhost
+  origin, and its client sends a custom `X-Run-Id` header that triggers
+  a preflight `OPTIONS`, which 404'd with no CORS middleware. Added
+  `hono/cors` on the `/chat` route (`origin: '*'`, allowing `POST`/
+  `OPTIONS` and the `Content-Type`/`X-Run-Id` headers).
+- **MCP result unwrapping**: `FunctionResponse.response` arrives as the
+  raw MCP envelope (`{ content: [...], structuredContent }`). Unwrapping
+  to just `structuredContent` before it becomes `TOOL_CALL_RESULT.content`
+  keeps the payload the clean `{ valid: true, ... }` shape the frontend's
+  tool-call trace is meant to display, not the full MCP envelope. Falls
+  back to the raw response for a tool that doesn't provide it.
+- Verified end-to-end: `curl` against real `RunAgentInput` bodies (single
+  tool call, and two parallel tool calls in one turn — correct
+  correlation for both), and live against the real
+  `payments-toolkit-frontend` UI — tool-call trace renders correctly
+  against genuine Gemini/MCP tool calls, not the frontend's mock.
+
 ## Fast-follows (explicitly out of scope for this PLAN, tracked for later)
 
 - Switch the MCP connection itself (not this agent's own HTTP API — see
@@ -234,35 +288,6 @@ Implementation (`src/http.ts`):
   connecting over that server's own `start:http` transport instead
 - Basic guardrails: spend/scope limits, input redaction before logging,
   explicit refusal handling for out-of-scope requests
-- Shape `src/http.ts`'s SSE stream as real AG-UI protocol events, in place
-  of the simple custom event shapes it emits for now (see step 7).
-  **Investigated, not just deferred:** there is no official ADK↔AG-UI
-  bridge for TypeScript — only Python's `ag_ui_adk` package (confirmed via
-  [ag-ui-protocol/ag-ui#874](https://github.com/ag-ui-protocol/ag-ui/issues/874),
-  a feature request for exactly this, closed unresolved; the person who
-  closed it found only an unrelated A2A-protocol workaround, and the
-  Python bridge's own maintainer commented on the same thread that he
-  hasn't found a way to connect `adk-js` either and is considering
-  building one himself). CopilotKit's own `docs.copilotkit.ai/google-adk`
-  quickstart isn't a different path — its starter repo
-  (`copilotkit/with-adk`) confirmed the agent side is Python
-  (`agent/main.py`, `pyproject.toml`), same bridge. Converting this whole
-  project to Python to get the bridge for free was also considered and
-  rejected — disproportionate (discards the whole working TS backend:
-  eval suite, HTTP server, logging, all verified) for one library, and
-  fragments the TS frontend/MCP/agent story this project is going for.
-  Decided plan for when the frontend project actually needs this:
-  install `@ag-ui/core` for its official TypeScript event types, and
-  write the ADK-event → AG-UI-event mapping ourselves against the public
-  AG-UI protocol spec (not by porting `ag_ui_adk`'s Python source, which
-  would be a murkier kind of copying) — a contained change to the part of
-  `src/http.ts` that currently turns `describeEvent`'s output into SSE
-  messages, nothing upstream. Build it against the real frontend once one
-  exists (AG-UI is pre-1.0 and still evolving; not worth guessing exact
-  event boundaries with no consumer to validate against), and check
-  first whether a real TS bridge has since shipped.
-- A Vue/Nuxt frontend (via TanStack AI's Vue client) consuming the AG-UI
-  stream — the actual demoable, client-facing piece
 - Multi-turn session state for `POST /chat` (session id, history store),
   if the frontend project turns out to need it
 - A visible cancel/interrupt control for an in-flight agent turn
@@ -284,8 +309,9 @@ Implementation (`src/http.ts`):
   server and prints a clear tool-call trace + final answer
 - `pnpm run eval` runs the scenario set and reports pass/fail per
   scenario
-- `pnpm run start:http` exposes `POST /chat` and streams SSE tool-call/
-  content/error events for a full agent turn, verified against a real
-  request
+- `pnpm run start:http` exposes `POST /chat` and streams real AG-UI
+  events (`RUN_STARTED`, `TOOL_CALL_*`, `TEXT_MESSAGE_*`, `RUN_FINISHED`/
+  `RUN_ERROR`) for a full agent turn, verified against a real request and
+  against the real `payments-toolkit-frontend` UI
 - README explains setup and scope clearly enough that a stranger (or a
   future you) could pick this up cold

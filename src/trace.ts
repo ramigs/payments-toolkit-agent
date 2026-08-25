@@ -3,8 +3,12 @@ import { EventType, type StructuredEvent } from '@google/adk';
 export interface EventOutcome {
   consoleLines: string[];
   toStderr?: boolean;
-  toolCall?: { name: string; args: Record<string, unknown> | undefined };
-  toolResult?: { name: string; result: unknown };
+  toolCall?: {
+    name: string;
+    args: Record<string, unknown> | undefined;
+    id?: string;
+  };
+  toolResult?: { name: string; result: unknown; id?: string };
   contentDelta?: string;
   isError?: boolean;
 }
@@ -23,7 +27,7 @@ export function describeEvent(structured: StructuredEvent): EventOutcome {
           `\n[tool call] ${name}`,
           `  args: ${JSON.stringify(structured.call.args)}`,
         ],
-        toolCall: { name, args: structured.call.args },
+        toolCall: { name, args: structured.call.args, id: structured.call.id },
       };
     }
     case EventType.TOOL_RESULT: {
@@ -32,7 +36,11 @@ export function describeEvent(structured: StructuredEvent): EventOutcome {
         consoleLines: [
           `[tool result] ${name}: ${JSON.stringify(structured.result.response)}`,
         ],
-        toolResult: { name, result: structured.result.response },
+        toolResult: {
+          name,
+          result: structured.result.response,
+          id: structured.result.id,
+        },
       };
     }
     case EventType.CONTENT:

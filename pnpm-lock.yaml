@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@ag-ui/core':
+        specifier: ^0.0.58
+        version: 0.0.58
       '@google/adk':
         specifier: ^2.0.0
         version: 2.0.0(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(express@5.2.1)
@@ -80,6 +83,9 @@ packages:
         optional: true
       express:
         optional: true
+
+  '@ag-ui/core@0.0.58':
+    resolution: {integrity: sha512-XgGb7YmhV+yMBaEmlrpsd5S+nUxq0JgSegss2t4gIFR1j7w3w0ibtKfRgcQHWeMvwZxcT5S28VEEarqtgxYYHw==}
 
   '@babel/helper-string-parser@7.29.7':
     resolution: {integrity: sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw==}
@@ -2136,6 +2142,9 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
@@ -2146,6 +2155,10 @@ snapshots:
       uuid: 11.1.1
     optionalDependencies:
       express: 5.2.1
+
+  '@ag-ui/core@0.0.58':
+    dependencies:
+      zod: 3.25.76
 
   '@babel/helper-string-parser@7.29.7': {}
 
@@ -4123,5 +4136,7 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@4.4.3):
     dependencies:
       zod: 4.4.3
+
+  zod@3.25.76: {}
 
   zod@4.4.3: {}
