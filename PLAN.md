@@ -232,8 +232,17 @@ Implementation (`src/http.ts`):
 Done once `payments-toolkit-frontend` existed as a real consumer to
 validate against — per the plan below, install `@ag-ui/core` and write
 the mapping ourselves rather than porting `ag_ui_adk`'s Python source.
-No TS ADK↔AG-UI bridge had shipped since the investigation below (still
-just `ag_ui_adk`, Python-only).
+No TS ADK↔AG-UI bridge existed that does what we needed here (server-side
+translation of a TS-run ADK agent into AG-UI events). A `typescript/`
+folder does exist under
+[ag-ui-protocol/ag-ui](https://github.com/ag-ui-protocol/ag-ui)'s
+`integrations/adk-middleware/`, published as `@ag-ui/adk` — but per its
+own README it's "a thin TypeScript client... that connects an AG-UI
+front end to an ADK-backed agent endpoint served by the companion
+**Python** middleware (`ag_ui_adk`)": just `ADKAgent extends HttpAgent`
+plus a `getCapabilities()` helper, no `@google/adk` import and no
+agent-running logic. The actual bridge is still Python-only
+(`ag_ui_adk`), confirmed by reading its source directly (2026-08-26).
 
 - Installed `@ag-ui/core` (`0.0.58`) for the official `EventType` enum,
   `RunAgentInputSchema`, and the typed `*Event` shapes — used directly,
