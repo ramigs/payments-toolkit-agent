@@ -9,6 +9,7 @@ import { RunAgentInputSchema } from '@ag-ui/core';
 import { buildAgent, discoverMcpServer, getMcpServerPath } from './agent.js';
 import { AgUiTranslator, extractPrompt, type AgUiEvent } from './ag-ui.js';
 import { createRunLogger, logToolCall, logToolResult } from './logging.js';
+import { McpUiResources } from './mcp-ui.js';
 import { describeEvent } from './trace.js';
 
 const mcpServerPath = getMcpServerPath();
@@ -30,6 +31,12 @@ const runner = new InMemoryRunner({
   appName: 'payments-toolkit-agent-http',
 });
 
+// Resolves the `ui://` widget resource for any MCP Apps tool (currently
+// detect_card_type) so /chat can forward it to the frontend. Held open
+// for the life of the server, like the toolset connection above.
+const mcpUi = new McpUiResources();
+await mcpUi.connect(mcpServerPath);
+
 const app = new Hono();
 
 // The frontend (payments-toolkit-frontend, a separate localhost origin) is
@@ -46,7 +53,10 @@ app.use(
   }),
 );
 
-async function emit(stream: SSEStreamingApi, ...events: AgUiEvent[]): Promise<void> {
+async function emit(
+  stream: SSEStreamingApi,
+  ...events: AgUiEvent[]
+): Promise<void> {
   for (const event of events) {
     await stream.writeSSE({ data: JSON.stringify(event) });
   }
@@ -107,19 +117,16 @@ app.post('/chat', async (c) => {
           );
         }
         if (outcome.toolResult) {
-          logToolResult(
-            runLog,
-            outcome.toolResult.name,
-            outcome.toolResult.result,
-          );
-          await emit(
-            stream,
-            translator.toolResult(
-              outcome.toolResult.name,
-              outcome.toolResult.result,
-              outcome.toolResult.id,
-            ),
-          );
+          const { name, result, id } = outcome.toolResult;
+          logToolResult(runLog, name, result);
+          await emit(stream, translator.toolResult(name, result, id));
+
+          // If this tool advertises an MCP Apps widget, forward its
+          // resource so the frontend can render it alongside the result.
+          const widget = await mcpUi.forTool(name);
+          if (widget) {
+            await emit(stream, translator.uiResource(name, id, widget));
+          }
         }
         if (outcome.contentDelta) {
           await emit(stream, ...translator.content(outcome.contentDelta));
@@ -147,8 +154,8 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 });
 
 async function shutdown(): Promise<void> {
-  console.error('[shutdown] closing MCP connection...');
-  await mcpToolset.close();
+  console.error('[shutdown] closing MCP connections...');
+  await Promise.allSettled([mcpToolset.close(), mcpUi.close()]);
   server.close(() => process.exit(0));
 }
 

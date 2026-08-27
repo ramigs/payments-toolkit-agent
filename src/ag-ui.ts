@@ -1,5 +1,6 @@
 import {
   EventType,
+  type CustomEvent,
   type RunAgentInput,
   type RunErrorEvent,
   type RunFinishedEvent,
@@ -12,6 +13,7 @@ import {
   type ToolCallResultEvent,
   type ToolCallStartEvent,
 } from '@ag-ui/core';
+import type { UiResourcePayload } from './mcp-ui.js';
 
 export type AgUiEvent =
   | RunStartedEvent
@@ -23,7 +25,8 @@ export type AgUiEvent =
   | ToolCallStartEvent
   | ToolCallArgsEvent
   | ToolCallEndEvent
-  | ToolCallResultEvent;
+  | ToolCallResultEvent
+  | CustomEvent;
 
 /**
  * Extracts the prompt to run from an AG-UI `RunAgentInput` — the last
@@ -40,7 +43,10 @@ export function extractPrompt(input: RunAgentInput): string | undefined {
     if (typeof message.content === 'string') return message.content;
     if (Array.isArray(message.content)) {
       return message.content
-        .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+        .filter(
+          (part): part is { type: 'text'; text: string } =>
+            part.type === 'text',
+        )
         .map((part) => part.text)
         .join('');
     }
@@ -95,13 +101,21 @@ export class AgUiTranslator {
   }
 
   runStarted(): RunStartedEvent {
-    return { type: EventType.RUN_STARTED, threadId: this.threadId, runId: this.runId };
+    return {
+      type: EventType.RUN_STARTED,
+      threadId: this.threadId,
+      runId: this.runId,
+    };
   }
 
   /** Must be emitted before any tool call — see class docstring. */
   open(): [TextMessageStartEvent, TextMessageEndEvent] {
     return [
-      { type: EventType.TEXT_MESSAGE_START, messageId: this.assistantMessageId, role: 'assistant' },
+      {
+        type: EventType.TEXT_MESSAGE_START,
+        messageId: this.assistantMessageId,
+        role: 'assistant',
+      },
       { type: EventType.TEXT_MESSAGE_END, messageId: this.assistantMessageId },
     ];
   }
@@ -120,13 +134,29 @@ export class AgUiTranslator {
         toolCallName: name,
         parentMessageId: this.assistantMessageId,
       },
-      { type: EventType.TOOL_CALL_ARGS, toolCallId, delta: JSON.stringify(args ?? {}) },
+      {
+        type: EventType.TOOL_CALL_ARGS,
+        toolCallId,
+        delta: JSON.stringify(args ?? {}),
+      },
       { type: EventType.TOOL_CALL_END, toolCallId },
     ];
   }
 
-  toolResult(name: string, result: unknown, id: string | undefined): ToolCallResultEvent {
-    const toolCallId = id ?? this.toolCallIdByName.get(name) ?? name;
+  /**
+   * The tool-call id a result/widget event should carry — the id ADK gave
+   * the call if present, else the one `toolCall()` minted for this name.
+   */
+  toolCallIdFor(name: string, id: string | undefined): string {
+    return id ?? this.toolCallIdByName.get(name) ?? name;
+  }
+
+  toolResult(
+    name: string,
+    result: unknown,
+    id: string | undefined,
+  ): ToolCallResultEvent {
+    const toolCallId = this.toolCallIdFor(name, id);
     return {
       type: EventType.TOOL_CALL_RESULT,
       messageId: `tool-${toolCallId}`,
@@ -136,10 +166,45 @@ export class AgUiTranslator {
     };
   }
 
-  content(text: string): [TextMessageStartEvent, TextMessageContentEvent, TextMessageEndEvent] {
+  /**
+   * Forwards an MCP Apps widget resource for a tool call as an AG-UI
+   * `CUSTOM` event. `@tanstack/ai`'s `StreamProcessor` recognises
+   * `name: 'ui-resource'` and reconciles `value` into a `ui-resource`
+   * message part on the assistant message, matched to the tool call by
+   * `toolCallId` — so this must be emitted *after* the corresponding
+   * `TOOL_CALL_START` (which registers that id). See
+   * payments-toolkit-frontend's `McpAppView.vue` for the render side.
+   */
+  uiResource(
+    name: string,
+    id: string | undefined,
+    payload: UiResourcePayload,
+  ): CustomEvent {
+    return {
+      type: EventType.CUSTOM,
+      name: 'ui-resource',
+      value: {
+        resource: payload.resource,
+        toolCallId: this.toolCallIdFor(name, id),
+        toolName: payload.toolName,
+      },
+    };
+  }
+
+  content(
+    text: string,
+  ): [TextMessageStartEvent, TextMessageContentEvent, TextMessageEndEvent] {
     return [
-      { type: EventType.TEXT_MESSAGE_START, messageId: this.assistantMessageId, role: 'assistant' },
-      { type: EventType.TEXT_MESSAGE_CONTENT, messageId: this.assistantMessageId, delta: text },
+      {
+        type: EventType.TEXT_MESSAGE_START,
+        messageId: this.assistantMessageId,
+        role: 'assistant',
+      },
+      {
+        type: EventType.TEXT_MESSAGE_CONTENT,
+        messageId: this.assistantMessageId,
+        delta: text,
+      },
       { type: EventType.TEXT_MESSAGE_END, messageId: this.assistantMessageId },
     ];
   }
@@ -149,6 +214,10 @@ export class AgUiTranslator {
   }
 
   runFinished(): RunFinishedEvent {
-    return { type: EventType.RUN_FINISHED, threadId: this.threadId, runId: this.runId };
+    return {
+      type: EventType.RUN_FINISHED,
+      threadId: this.threadId,
+      runId: this.runId,
+    };
   }
 }
