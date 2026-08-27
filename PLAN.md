@@ -26,7 +26,8 @@ project) will add an AG-UI-based frontend on top of this backend.
 
 ## Prerequisites
 
-- Node.js 18+ (matching the MCP server's requirement)
+- Node.js 20.3+ (for `AbortSignal.any`, used by `/chat` cancellation — see
+  Step 10); pinned to v24 via `.nvmrc`
 - pnpm
 - `payments-toolkit-mcp` built and runnable locally (`pnpm run build` in
   that repo)
@@ -38,13 +39,20 @@ project) will add an AG-UI-based frontend on top of this backend.
 ```
 payments-toolkit-agent/
   src/
-    index.ts              # entry point: runs a single-turn or REPL-style agent session
-    http.ts                # entry point: long-lived HTTP server, POST /chat over SSE (see Step 7)
-    agent.ts              # agent definition: system prompt, MCP server registration
-    logging.ts            # structured logging for tool calls (see Step 4)
+    index.ts             # entry point: single-turn CLI agent run (argv or stdin)
+    http.ts              # entry point: HTTP server — wires deps into createChatApp, serve() (see Steps 7, 10)
+    app.ts               # Hono app factory: POST /chat (AG-UI/SSE) + POST /chat/:runId/cancel (see Steps 8, 10)
+    agent.ts             # agent definition: system prompt, MCP server registration
+    prompt.ts            # reads the CLI prompt from argv or stdin (index.ts only)
+    trace.ts             # maps one ADK structured event to an EventOutcome — shared by all three runners
+    ag-ui.ts             # EventOutcome → official AG-UI event translation (see Step 8)
+    mcp-ui.ts            # resolves MCP Apps `ui://` widget resources for /chat (see Step 9)
+    logging.ts           # structured, redacted tool-call logging to logs/agent.log (see Step 4)
+  tests/unit/            # vitest suites for the deterministic logic in src/ (agent, prompt, trace, logging, app)
   eval/
-    scenarios.ts           # scenario-based eval set (see Step 5)
-    run-eval.ts             # eval runner script
+    scenarios.ts         # scenario-based eval set (see Step 5)
+    run-eval.ts           # eval runner script
+    JOURNAL.md            # running log of eval findings and fixes
   .env.example
   package.json
   tsconfig.json
@@ -186,17 +194,20 @@ This is the API layer the step-2 frontend project will actually talk to —
 until now, this backend was only reachable via CLI. Decided ahead of time
 (see the brainstorming doc that seeded this step):
 
-- **Single-turn, not session-aware.** One `POST /chat` runs one
-  `runEphemeral()` agent turn and streams its events back — no
-  conversation history kept between requests. Mirrors what `src/index.ts`
-  already does, just over HTTP instead of argv/stdin. Multi-turn session
-  state (a session id, a history store) is real added complexity that the
-  frontend project may not even need on day one — deferred until it's
-  known to be needed, not built ahead of it.
-- **This repo's own simple SSE event shapes for now, not the official AG-UI
-  protocol schema.** `tool_call` / `tool_result` / `content` / `error` /
-  `done` events, a near-direct reuse of `src/trace.ts`'s existing
-  `describeEvent` mapping. AG-UI standardizes the event _shape_, not the
+- **Single-turn, not session-aware.** One `POST /chat` runs one agent turn
+  and streams its events back — no conversation history kept between
+  requests. Mirrors what `src/index.ts` already does, just over HTTP
+  instead of argv/stdin. (Originally `runner.runEphemeral()`; Step 10
+  replaced it with a hand-rolled `createSession()` → `runAsync()` →
+  `deleteSession()` so an `AbortSignal` can be threaded through the turn.)
+  Multi-turn session state (a session id, a history store) is real added
+  complexity that the frontend project may not even need on day one —
+  deferred until it's known to be needed, not built ahead of it.
+- **(Superseded by Step 8.)** _This repo's own simple SSE event shapes for
+  now, not the official AG-UI protocol schema._ `tool_call` /
+  `tool_result` / `content` / `error` / `done` events, a near-direct reuse
+  of `src/trace.ts`'s existing `describeEvent` mapping. AG-UI standardizes
+  the event _shape_, not the
   transport (SSE/WebSocket/etc. are all valid AG-UI transports) — so
   "stream events over SSE" and "shape those events as AG-UI" are separable
   decisions. Adopting the official `ag-ui-protocol` ADK integration is
@@ -209,23 +220,27 @@ until now, this backend was only reachable via CLI. Decided ahead of time
   Express's more manual SSE plumbing (Express was the other candidate,
   for consistency with `payments-toolkit-mcp`'s own HTTP transport).
 
-Implementation (`src/http.ts`):
+Implementation:
 
 - The agent, MCP connection (child process), and ADK `InMemoryRunner` are
   built **once** at server startup and reused across every request —
   unlike the CLI, which builds fresh per invocation since it exits after
   one turn. `SIGINT`/`SIGTERM` close the MCP connection before exit.
-- `POST /chat` takes `{ "prompt": string }`, returns `400` on missing/
-  invalid JSON or an empty prompt, otherwise streams SSE events reusing
-  the exact same `describeEvent`/`logToolCall`/`logToolResult` pipeline
-  the CLI and eval runner already share — one source of truth for "what
-  happened," now three consumers (CLI stdout, `logs/agent.log`, and this
-  SSE stream).
+- The `/chat` handler streams SSE events reusing the exact same
+  `describeEvent`/`logToolCall`/`logToolResult` pipeline the CLI and eval
+  runner already share — one source of truth for "what happened," now
+  three consumers (CLI stdout, `logs/agent.log`, and this SSE stream).
 - `PORT` env var, default `3001` (payments-toolkit-mcp's own
   `start:http` defaults to `3000`, so both can run at once unset).
 - Verified end-to-end with a real request (`curl -N`): correct SSE
   framing, correct tool call, correct result, correct final answer, and a
   confirmed graceful shutdown on `SIGTERM`.
+
+**Since superseded:** the request body moved from `{ "prompt": string }` to
+an AG-UI `RunAgentInput` (Step 8), and the `/chat` + cancel route logic
+moved out of `src/http.ts` into `src/app.ts`'s `createChatApp({ runner,
+mcpUi })` factory (Step 10) — `src/http.ts` is now just dependency wiring
+plus `serve()`.
 
 ### 8. Real AG-UI protocol translator for `/chat`
 
@@ -290,6 +305,82 @@ agent-running logic. The actual bridge is still Python-only
   `payments-toolkit-frontend` UI — tool-call trace renders correctly
   against genuine Gemini/MCP tool calls, not the frontend's mock.
 
+### 9. Forward MCP Apps widget resources to the frontend
+
+`payments-toolkit-mcp`'s `detect_card_type` tool advertises an MCP Apps UI
+widget via `_meta.ui.resourceUri` (a `ui://payments-toolkit/card-preview`
+resource). `/chat` forwards that widget so the frontend can render it inline
+with the tool result.
+
+- `src/mcp-ui.ts`'s `McpUiResources` owns a **dedicated, persistent** MCP
+  client — its own stdio child, connected once at server boot and reused
+  for the life of the process — purely to resolve `ui://` resources. Kept
+  separate from the ADK toolset's MCP access, which is model-driven,
+  doesn't surface tool `_meta`, and (in `@google/adk@2.0.0`) spawns a
+  throwaway stdio child per tool call rather than holding one open.
+- On boot it lists tools, records which advertise a `ui://` resource, and
+  logs the map. It also runs the shared `verifyMcpServer` sanity check
+  (tools/resources/prompts present, warn if not) over this same connection,
+  so the HTTP server no longer opens a second throwaway MCP child just for
+  that — the CLI still uses the standalone `discoverMcpServer`. On each tool
+  result in `/chat`, `forTool(name)` returns the widget's resource payload
+  (body cached — static for the life of the server) or `undefined`.
+- `AgUiTranslator.uiResource()` emits it as an AG-UI `CUSTOM` event
+  (`name: 'ui-resource'`), correlated to the tool call by `toolCallId`,
+  **after** the `TOOL_CALL_RESULT`. `@tanstack/ai`'s `StreamProcessor`
+  reconciles it into a `ui-resource` message part — see
+  `payments-toolkit-frontend`'s `McpAppView.vue` for the render side.
+- Verified end-to-end against the real frontend: the card-preview widget
+  renders alongside a genuine `detect_card_type` call.
+
+### 10. Cancel / interrupt for an in-flight `/chat` turn
+
+The step-2 frontend needs a Stop control. Two independent triggers, unified
+into one `AbortSignal` per turn via `AbortSignal.any`:
+
+- **Client disconnect** — `c.req.raw.signal` (`@hono/node-server` fires it
+  when the browser drops the connection). Zero API surface, but fragile:
+  buffering proxies can hold the upstream socket open after the user hits
+  Stop, so the agent would keep burning tokens.
+- **Explicit side-channel** — `POST /chat/:runId/cancel`. The frontend
+  already holds `runId` (it's in every `RunAgentInput`), so it can cancel
+  the moment Stop is clicked without waiting for the socket. `202` if a run
+  was aborted, `404` if none is in flight (finished / unknown — a caller
+  no-op). Needs its own `hono/cors` glob registration, since `/chat` is
+  path-exact in Hono.
+- A per-process `Map<runId, AbortController>` registry holds the controller
+  for each in-flight turn; the stream's `finally` deletes it.
+- The signal is threaded into `runner.runAsync({ ..., abortSignal })`.
+  `runEphemeral()` doesn't forward an `abortSignal`, so `/chat` now
+  hand-rolls what it did internally: `sessionService.createSession()` →
+  `runAsync()` → `deleteSession()` in a `finally`. ADK fans the one signal
+  out to the invocation loop (stops between steps), the Gemini streaming
+  call (the real cost), and any in-flight MCP tool call.
+- ADK's `runAsync` **returns** (doesn't throw) on abort, so the event loop
+  just ends. A terminal AG-UI event is then emitted so the client's
+  `StreamProcessor` finalizes the run instead of leaving a half-open
+  "streaming" message. `@ag-ui/core@0.0.58` has no `RUN_CANCELLED`, so a
+  cancelled run is reported as `RUN_ERROR` with message `"cancelled"`
+  (best-effort write — on a client disconnect the socket is already gone).
+- **Refactor for testability:** the `/chat` + cancel route logic moved from
+  `src/http.ts` into `src/app.ts`'s `createChatApp({ runner, mcpUi })`
+  factory, behind narrow `ChatRunner` / `ChatMcpUi` interfaces (the real
+  `InMemoryRunner` / `McpUiResources` satisfy them structurally).
+  `src/http.ts` shrank to dependency wiring plus `serve()`.
+- **Observability:** run lifecycle is now recorded in `logs/agent.log` via
+  the per-run logger (`run started` / `run finished` / `run cancelled` with
+  `trigger: "cancel-endpoint" | "client-disconnect"` / `run error`), and a
+  cancelled turn also prints a `[cancel] run <runId> aborted (<trigger>)`
+  line to stderr (`[boot]`/`[shutdown]` style); the cancel endpoint logs
+  `[cancel] no in-flight run <runId>` on a `404`. Before this the tool-call
+  audit was the only per-request logging and cancellation was silent.
+- Verified with `curl` (explicit cancel mid-run, cancel-after-finish,
+  client disconnect) and `tests/unit/app.test.ts`, which drives the app via
+  Hono's `app.request()` with a fake generator runner: normal completion,
+  explicit cancel mid-run (terminal `RUN_ERROR`/`cancelled`, no
+  `RUN_FINISHED`, registry cleaned up), client disconnect via the request
+  signal, and `404` for an unknown `runId`.
+
 ## Fast-follows (explicitly out of scope for this PLAN, tracked for later)
 
 - Switch the MCP connection itself (not this agent's own HTTP API — see
@@ -299,7 +390,6 @@ agent-running logic. The actual bridge is still Python-only
   explicit refusal handling for out-of-scope requests
 - Multi-turn session state for `POST /chat` (session id, history store),
   if the frontend project turns out to need it
-- A visible cancel/interrupt control for an in-flight agent turn
 - Revisit the agent's logging destination (`src/logging.ts`) once this
   backend becomes a long-lived HTTP service rather than a one-shot CLI —
   at that point it should switch from writing to `logs/agent.log` back
@@ -319,8 +409,14 @@ agent-running logic. The actual bridge is still Python-only
 - `pnpm run eval` runs the scenario set and reports pass/fail per
   scenario
 - `pnpm run start:http` exposes `POST /chat` and streams real AG-UI
-  events (`RUN_STARTED`, `TOOL_CALL_*`, `TEXT_MESSAGE_*`, `RUN_FINISHED`/
-  `RUN_ERROR`) for a full agent turn, verified against a real request and
-  against the real `payments-toolkit-frontend` UI
+  events (`RUN_STARTED`, `TOOL_CALL_*`, `TEXT_MESSAGE_*`, the `CUSTOM`
+  `ui-resource` event for MCP Apps widgets, `RUN_FINISHED`/`RUN_ERROR`)
+  for a full agent turn, verified against a real request and against the
+  real `payments-toolkit-frontend` UI
+- `POST /chat/:runId/cancel` (and a client disconnect) aborts an in-flight
+  turn — killing the model request and emitting a terminal
+  `RUN_ERROR`/`cancelled` — verified via `curl` and `tests/unit/app.test.ts`
+- `pnpm test` passes, covering `src/`'s deterministic logic including the
+  `/chat` and cancel routes
 - README explains setup and scope clearly enough that a stranger (or a
   future you) could pick this up cold

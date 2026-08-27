@@ -4,7 +4,7 @@
   "description": "Agent backend, built with Google ADK, exposing payments-toolkit-mcp as a conversational interface.",
   "type": "module",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.3.0"
   },
   "packageManager": "pnpm@10.20.0",
   "scripts": {

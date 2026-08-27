@@ -9,12 +9,14 @@ walkthrough, including the reasoning behind each design decision.
 
 This is step 1 of 2: a local backend (CLI and HTTP+SSE) that proves out the
 full loop (user request → agent reasoning → MCP tool call → tool result →
-agent response) with visibility into each step. Step 2 (a separate project)
-adds an AG-UI-based frontend on top of this backend's HTTP endpoint.
+agent response) with visibility into each step. Step 2
+(`payments-toolkit-frontend`, a separate project) adds an AG-UI-based
+frontend on top of this backend's HTTP endpoint.
 
 ## Prerequisites
 
-- Node.js 18+ (project developed against v24)
+- Node.js 20.3+ (for `AbortSignal.any`; project developed against v24,
+  pinned via `.nvmrc`)
 - [pnpm](https://pnpm.io)
 - [`payments-toolkit-mcp`](https://github.com/ramigs/payments-toolkit-mcp)
   built locally (`pnpm run build` in that repo)
@@ -73,42 +75,55 @@ Run the agent as a long-lived HTTP server instead of a one-shot CLI call:
 pnpm run start:http
 ```
 
-Listens on `PORT` (default `3001`) and exposes one endpoint:
+Listens on `PORT` (default `3001`) and exposes:
 
 ```
 POST /chat
 Content-Type: application/json
 
-{ "prompt": "Is DE89370400440532013000 a valid IBAN?" }
+<an AG-UI RunAgentInput: { threadId, runId, messages, ... }>
 ```
 
-The response is a Server-Sent Events stream — one full agent turn per
-request, no conversation state kept between requests (the frontend project
-is responsible for session/thread identity if it needs multi-turn memory).
-Each event mirrors what the CLI trace prints, so a client sees the same
-tool-call visibility:
+The request body is a full [AG-UI](https://docs.ag-ui.com) `RunAgentInput`
+(validated with `@ag-ui/core`'s `RunAgentInputSchema`); the prompt is taken
+from the last `role: "user"` message. The response is a Server-Sent Events
+stream of official AG-UI events — one full agent turn per request, no
+conversation state kept between requests (the frontend project owns
+session/thread identity if it needs multi-turn memory):
 
 ```
-event: tool_call
-data: {"name":"validate_iban","args":{"iban":"DE89370400440532013000"}}
-
-event: tool_result
-data: {"name":"validate_iban","result":{...}}
-
-event: content
-data: {"text":"Yes, DE89370400440532013000 is a valid IBAN (country: Germany)."}
-
-event: done
-data: {}
+data: {"type":"RUN_STARTED","threadId":"...","runId":"..."}
+data: {"type":"TOOL_CALL_START","toolCallId":"...","toolCallName":"validate_iban", ...}
+data: {"type":"TOOL_CALL_ARGS","toolCallId":"...","delta":"{\"iban\":\"DE89...\"}"}
+data: {"type":"TOOL_CALL_END","toolCallId":"..."}
+data: {"type":"TOOL_CALL_RESULT","toolCallId":"...","content":"{...}"}
+data: {"type":"TEXT_MESSAGE_START","messageId":"...","role":"assistant"}
+data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"Yes, DE89... is a valid IBAN."}
+data: {"type":"TEXT_MESSAGE_END","messageId":"..."}
+data: {"type":"RUN_FINISHED","threadId":"...","runId":"..."}
 ```
 
-An `event: error` with `{"message": "..."}` can appear instead of/alongside
-`content` if a tool call fails. These are this repo's own event shapes, not
-yet the official AG-UI protocol schema — see the "Scope" section below.
+A tool that advertises an [MCP Apps](https://github.com/modelcontextprotocol)
+widget (currently `detect_card_type`) also emits a `CUSTOM` event with
+`name: "ui-resource"` after its `TOOL_CALL_RESULT`, carrying the widget
+resource for the frontend to render. On failure, a terminal
+`{"type":"RUN_ERROR","message":"..."}` replaces `RUN_FINISHED`.
 
-The MCP connection (one child process, spawned once at server startup) and
-the tool-call audit log (`logs/agent.log`, same masking as the CLI) are
-shared across all requests, unlike the CLI which reconnects per invocation.
+```
+POST /chat/:runId/cancel
+```
+
+Cancels an in-flight turn: aborts the model request (and any in-flight MCP
+tool call), then closes the stream with `RUN_ERROR` / `"cancelled"`.
+Returns `202` if a run was aborted, `404` if none is in flight (already
+finished, or unknown `runId`). Dropping the `/chat` connection cancels the
+turn the same way — the endpoint just doesn't depend on the socket closing,
+which a proxy can delay.
+
+The tool-call audit log (`logs/agent.log`, same masking as the CLI) is
+shared across all requests. The `@google/adk` MCP toolset opens a fresh
+stdio child per tool call rather than holding one open; the one persistent
+MCP client is `src/mcp-ui.ts`'s, used only to resolve widget resources.
 
 ## Eval suite
 
@@ -150,46 +165,49 @@ pnpm run test:watch    # re-run on file changes
 pnpm run test:coverage # run once and print a coverage report
 ```
 
-These cover the deterministic logic in `src/` (event-to-CLI-output mapping,
-argument masking, prompt parsing) — a different, narrower concern than the
-eval suite above, which checks the agent's own decisions.
+These cover the deterministic logic in `src/` (event mapping, argument
+masking, prompt parsing, and the `/chat` + cancel routes via a fake
+runner) — a different, narrower concern than the eval suite above, which
+checks the agent's own decisions.
 
 ## Project structure
 
 ```
 src/
   index.ts       # entry point: single-turn CLI runner
-  http.ts        # entry point: long-lived HTTP server, POST /chat over SSE
+  http.ts        # entry point: HTTP server — wires deps into createChatApp, serve()
+  app.ts         # Hono app factory: POST /chat (AG-UI/SSE) + POST /chat/:runId/cancel
   agent.ts       # agent definition: system prompt, MCP server registration
-  trace.ts       # maps one ADK structured event to CLI output / log input
+  trace.ts       # maps one ADK structured event to an EventOutcome (CLI, eval, and /chat)
+  ag-ui.ts       # translates EventOutcome into official AG-UI events
+  mcp-ui.ts      # resolves MCP Apps `ui://` widget resources for /chat
   logging.ts     # structured, redacted tool-call logging (logs/agent.log)
-  prompt.ts      # reads the user's prompt from argv or stdin
+  prompt.ts      # reads the user's prompt from argv or stdin (CLI only)
 eval/
   scenarios.ts   # scenario-based eval set — expectations per tool/args/response
   run-eval.ts    # eval runner: builds the agent, runs each scenario, grades it
   JOURNAL.md     # running log of eval findings and fixes
-tests/unit/       # unit tests for src/, mirrored 1:1
+tests/unit/       # unit tests for the deterministic logic in src/
 ```
 
 ## Scope
 
 This is a deliberate first iteration, not an unfinished one:
 
-- No frontend yet — backend only (CLI + HTTP/SSE), verified via terminal
-  output, curl, and logs
+- No frontend in this repo — backend only (CLI + HTTP/SSE), verified via
+  terminal output, curl, and logs; the frontend is a separate project
+  (`payments-toolkit-frontend`)
 - No new MCP tools — reuses the three existing ones as-is
 - No production deployment — local-first, spawns the MCP server as a child
   process over stdio
 - No auth/guardrail system yet
-- The HTTP server's SSE events are this repo's own simple shapes
-  (`tool_call`/`tool_result`/`content`/`error`/`done`), not yet the official
-  AG-UI protocol schema — deferred until the frontend project actually
-  needs to consume them, per the ADK-specific `ag-ui-protocol/ag-ui`
-  integration rather than a hand-rolled one
+- `/chat` emits the official AG-UI protocol events, translated from the ADK
+  event stream by hand in `src/ag-ui.ts` (no TypeScript ADK↔AG-UI bridge
+  exists — the published `@ag-ui/adk` is a client for a Python middleware)
 - No multi-turn session state — each `/chat` request is a single, isolated
   agent turn
 
 See the "Fast-follows" section of [PLAN.md](./PLAN.md) for what's tracked
-for later (MCP-connection-over-HTTP transport, guardrails, AG-UI-shaped
-events, a frontend, and revisiting the CLI's logging destination once it
-also becomes a long-lived service).
+for later (MCP-connection-over-HTTP transport, guardrails, multi-turn
+session state, and revisiting the CLI's logging destination once it also
+becomes a long-lived service).

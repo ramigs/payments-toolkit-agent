@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { verifyMcpServer } from './agent.js';
 
 /**
  * The `ui-resource` payload this agent forwards to the frontend on an AG-UI
@@ -40,11 +41,17 @@ function getToolUiResourceUri(tool: {
  * Owns a dedicated MCP client connection used only to resolve the `ui://`
  * widget resources that MCP Apps tools reference via `_meta.ui.resourceUri`.
  *
- * Kept separate from the ADK toolset's own MCP connection: that one is
- * driven by the model and doesn't surface tool `_meta` or expose
- * `resources/read` to us. This is a third short stdio child (alongside the
- * ADK toolset and the one-shot boot sanity check in `discoverMcpServer`),
- * held open for the life of the HTTP server.
+ * Kept separate from the ADK toolset's MCP access: that path is driven by
+ * the model and doesn't surface tool `_meta` or expose `resources/read` to
+ * us (and @google/adk@2.0.0 spawns a throwaway stdio child per tool call
+ * rather than holding one open). This client is a dedicated stdio child,
+ * connected once and held open for the life of the HTTP server, reused for
+ * every resource read.
+ *
+ * `connect()` also runs `verifyMcpServer` over this same client, so the HTTP
+ * entrypoint gets the boot-time tools/resources/prompts sanity check
+ * without a second throwaway connection (the CLI still uses the standalone
+ * `discoverMcpServer` for that).
  */
 export class McpUiResources {
   private client: Client | undefined;
@@ -63,6 +70,9 @@ export class McpUiResources {
       new StdioClientTransport({ command: 'node', args: [mcpServerPath] }),
     );
     this.client = client;
+
+    // Boot sanity check over this same connection (see class docstring).
+    await verifyMcpServer(client);
 
     const { tools } = await client.listTools();
     for (const tool of tools) {

@@ -94,9 +94,33 @@ export function buildAgent(mcpServerPath: string): {
 }
 
 /**
- * Connects to the MCP server directly (independent of the ADK agent's own
- * connection) to confirm it exposes exactly what this agent expects, and
- * logs what was discovered. Run once at boot as a sanity check.
+ * Lists the MCP server's tools/resources/prompts over an already-connected
+ * client, logs the discovered surface, and warns if anything this agent
+ * expects is missing. Shared by the CLI's standalone boot check
+ * (`discoverMcpServer`) and the HTTP server's persistent MCP-UI client, so
+ * the HTTP path doesn't open a second throwaway connection just to verify.
+ */
+export async function verifyMcpServer(client: Client): Promise<void> {
+  const { tools } = await client.listTools();
+  const { resources } = await client.listResources();
+  const { prompts } = await client.listPrompts();
+
+  console.error(
+    `[boot] connected to ${MCP_SERVER_NAME}: tools=[${tools.map((t) => t.name).join(', ')}] ` +
+      `resources=[${resources.map((r) => r.name).join(', ')}] ` +
+      `prompts=[${prompts.map((p) => p.name).join(', ')}]`,
+  );
+
+  warnIfMissing('tools', TOOL_NAMES, tools);
+  warnIfMissing('resources', RESOURCE_NAMES, resources);
+  warnIfMissing('prompts', PROMPT_NAMES, prompts);
+}
+
+/**
+ * Opens a throwaway MCP connection (independent of the ADK agent's own) to
+ * run `verifyMcpServer` once at boot, then closes it. Used by the CLI; the
+ * HTTP server runs the same check against its persistent MCP-UI client
+ * instead of spawning this extra child.
  */
 export async function discoverMcpServer(mcpServerPath: string): Promise<void> {
   const client = new Client({
@@ -110,20 +134,7 @@ export async function discoverMcpServer(mcpServerPath: string): Promise<void> {
 
   try {
     await client.connect(transport);
-
-    const { tools } = await client.listTools();
-    const { resources } = await client.listResources();
-    const { prompts } = await client.listPrompts();
-
-    console.error(
-      `[boot] connected to ${MCP_SERVER_NAME}: tools=[${tools.map((t) => t.name).join(', ')}] ` +
-        `resources=[${resources.map((r) => r.name).join(', ')}] ` +
-        `prompts=[${prompts.map((p) => p.name).join(', ')}]`,
-    );
-
-    warnIfMissing('tools', TOOL_NAMES, tools);
-    warnIfMissing('resources', RESOURCE_NAMES, resources);
-    warnIfMissing('prompts', PROMPT_NAMES, prompts);
+    await verifyMcpServer(client);
   } finally {
     await client.close();
   }
