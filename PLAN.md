@@ -278,16 +278,21 @@ agent-running logic. The actual bridge is still Python-only
   `FunctionCall.id`/`FunctionResponse.id`) so results correlate to their
   calls via AG-UI's `toolCallId` — additive, doesn't touch existing
   fields, existing tests still pass unmodified.
-- **Reused the client-bug workaround discovered building the frontend
-  (see `payments-toolkit-frontend/PLAN.md`, "What we learned building
-  the backend"):** `@tanstack/ai@0.49.1`'s `StreamProcessor` drops the
-  first `TEXT_MESSAGE_CONTENT` delta when `TOOL_CALL_START` references a
-  message with no prior `TEXT_MESSAGE_START` — which is exactly this
-  backend's real event order (tool calls always precede the one final
-  content block; confirmed via direct event-dump against the live agent,
-  single- and multi-tool-call turns both). `AgUiTranslator.open()` emits
-  an empty `TEXT_MESSAGE_START`/`TEXT_MESSAGE_END` pair for the assistant
-  message before any tool call, same fix as the frontend's mock server.
+- **Client-bug workaround discovered building the frontend — now removed,
+  fixed upstream (see `payments-toolkit-frontend/PLAN.md`):**
+  `@tanstack/ai@0.49.1`'s `StreamProcessor` dropped the first
+  `TEXT_MESSAGE_CONTENT` delta when `TOOL_CALL_START` referenced a
+  message with no prior `TEXT_MESSAGE_START` — exactly this backend's
+  real event order (tool calls always precede the one final content
+  block; confirmed via direct event-dump against the live agent, single-
+  and multi-tool-call turns both). Worked around with an empty
+  `TEXT_MESSAGE_START`/`TEXT_MESSAGE_END` pair up front
+  (`AgUiTranslator.open()`), same as the frontend's mock server.
+  `@tanstack/ai@0.51.0` fixed it (`handleTextMessageStartEvent` resets
+  the segment accumulator when the message was already marked by a tool
+  call) and the frontend now runs `0.52.0`, so `open()` and its call in
+  `app.ts` were deleted. Re-add the empty pair only if a client pinned to
+  `@tanstack/ai` 0.49.x / 0.50.x ever consumes this stream again.
 - **CORS**: `/chat` had none — the frontend is a different localhost
   origin, and its client sends a custom `X-Run-Id` header that triggers
   a preflight `OPTIONS`, which 404'd with no CORS middleware. Added

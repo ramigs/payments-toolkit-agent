@@ -79,14 +79,16 @@ function unwrapMcpResult(result: unknown): unknown {
  * outcomes (see trace.ts's `describeEvent`) into a real AG-UI event
  * stream for one agent run. One instance per `/chat` request.
  *
- * Known `@tanstack/ai@0.49.1` client bug (see
- * payments-toolkit-frontend's PLAN.md "What we learned building the
- * backend"): a `TOOL_CALL_START` whose `parentMessageId` has no prior
- * `TEXT_MESSAGE_START` causes the client to silently drop the first
- * `TEXT_MESSAGE_CONTENT` delta of the real text segment that follows.
- * Worked around here exactly as in the frontend's mock server: `open()`
- * emits an empty `TEXT_MESSAGE_START`/`TEXT_MESSAGE_END` pair for the
- * assistant message up front, before any tool call can reference it.
+ * This emits `TOOL_CALL_START` (with `parentMessageId`) before the
+ * assistant message has had a `TEXT_MESSAGE_START` — the "tool call,
+ * then final answer" order. `@tanstack/ai@0.49.1`'s `StreamProcessor`
+ * mishandled that and dropped the first `TEXT_MESSAGE_CONTENT` delta of
+ * the text that followed; the frontend (and this translator) worked
+ * around it with an empty `TEXT_MESSAGE_START`/`TEXT_MESSAGE_END` pair up
+ * front. Fixed upstream in `@tanstack/ai@0.51.0`
+ * (`handleTextMessageStartEvent` now resets the segment accumulator when
+ * the message was already marked by a tool call), and payments-toolkit-
+ * frontend now runs `0.52.0`, so the workaround is gone from both sides.
  */
 export class AgUiTranslator {
   readonly assistantMessageId: string;
@@ -106,18 +108,6 @@ export class AgUiTranslator {
       threadId: this.threadId,
       runId: this.runId,
     };
-  }
-
-  /** Must be emitted before any tool call — see class docstring. */
-  open(): [TextMessageStartEvent, TextMessageEndEvent] {
-    return [
-      {
-        type: EventType.TEXT_MESSAGE_START,
-        messageId: this.assistantMessageId,
-        role: 'assistant',
-      },
-      { type: EventType.TEXT_MESSAGE_END, messageId: this.assistantMessageId },
-    ];
   }
 
   toolCall(

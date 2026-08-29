@@ -150,7 +150,7 @@ export function createChatApp({ runner, mcpUi }: ChatAppDeps): Hono {
 
       try {
         runLog.info('run started');
-        await emit(stream, translator.runStarted(), ...translator.open());
+        await emit(stream, translator.runStarted());
 
         outer: for await (const event of runner.runAsync({
           userId: USER_ID,
