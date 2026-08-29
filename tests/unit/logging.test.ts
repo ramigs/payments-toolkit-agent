@@ -53,6 +53,18 @@ describe('maskArgs', () => {
   it('returns an empty object for empty args', () => {
     expect(maskArgs({})).toEqual({});
   });
+
+  it('recurses into nested objects and arrays', () => {
+    expect(
+      maskArgs({
+        cards: [{ cardNumber: '4111111111111111' }],
+        meta: { note: 'primary', count: 2 },
+      }),
+    ).toEqual({
+      cards: [{ cardNumber: '************1111' }],
+      meta: { note: '***mary', count: 2 },
+    });
+  });
 });
 
 describe('logToolCall', () => {
@@ -81,13 +93,34 @@ describe('logToolCall', () => {
 });
 
 describe('logToolResult', () => {
-  it('logs the tool name with the raw, unmasked result', () => {
+  it('leaves non-string result fields untouched', () => {
     const { info, log } = fakeLogger();
     logToolResult(log, 'validate_card_number', { valid: true });
     expect(info).toHaveBeenCalledWith(
       { target: 'validate_card_number', result: { valid: true } },
       'tool call finished',
     );
+  });
+
+  it('masks a card number echoed back in the result', () => {
+    const { info, log } = fakeLogger();
+    logToolResult(log, 'detect_card_type', {
+      structuredContent: { network: 'Visa', cardNumber: '4111111111111111' },
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            network: 'Visa',
+            cardNumber: '4111111111111111',
+          }),
+        },
+      ],
+    });
+    const [payload] = info.mock.calls[0] as [
+      { result: { structuredContent: { cardNumber: string } } },
+    ];
+    expect(payload.result.structuredContent.cardNumber).toBe('************1111');
+    expect(JSON.stringify(payload)).not.toContain('4111111111111111');
   });
 });
 

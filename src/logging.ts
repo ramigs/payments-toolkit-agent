@@ -29,17 +29,26 @@ export function createRunLogger(): pino.Logger {
 }
 
 // All current tool arguments are sensitive payment identifiers (card
-// numbers, IBANs), so every string argument is masked to its last 4
-// characters rather than maintaining a per-field allowlist of sensitive
-// names — same approach as payments-toolkit-mcp's own tool-call logging.
+// numbers, IBANs), so every string is masked to its last 4 characters
+// rather than maintaining a per-field allowlist of sensitive names — same
+// approach as payments-toolkit-mcp's own tool-call logging. Recurses into
+// arrays and nested objects so a masked string can't slip through inside a
+// structured payload.
+export function maskDeep(value: unknown): unknown {
+  if (typeof value === 'string') return maskSensitive(value);
+  if (Array.isArray(value)) return value.map(maskDeep);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, v]) => [key, maskDeep(v)]),
+    );
+  }
+  return value;
+}
+
 export function maskArgs(
   args: Record<string, unknown>,
 ): Record<string, unknown> {
-  const masked: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(args)) {
-    masked[key] = typeof value === 'string' ? maskSensitive(value) : value;
-  }
-  return masked;
+  return maskDeep(args) as Record<string, unknown>;
 }
 
 function maskSensitive(value: string): string {
@@ -55,13 +64,15 @@ export function logToolCall(
   log.info({ target: name, args: maskArgs(args ?? {}) }, 'tool call started');
 }
 
-// The tool's raw result never contains the original card number/IBAN — our
-// three tools return only a verdict (valid/network/country) — so it's
-// logged as-is, unlike the arguments.
+// `detect_card_type` echoes the full card number back in its result, so the
+// result is masked with the same blanket rule as the arguments — every
+// string down to its last 4 characters. This trades away log readability of
+// the non-sensitive fields (network, country) for not maintaining an
+// allowlist; nothing reads this file programmatically.
 export function logToolResult(
   log: pino.Logger,
   name: string,
   result: unknown,
 ): void {
-  log.info({ target: name, result }, 'tool call finished');
+  log.info({ target: name, result: maskDeep(result) }, 'tool call finished');
 }
