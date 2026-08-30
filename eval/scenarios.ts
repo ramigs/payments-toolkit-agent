@@ -51,13 +51,25 @@ export const scenarios: Scenario[] = [
     },
   },
   {
-    id: 'card-network-only',
+    id: 'card-network-valid',
     description:
-      'a prompt that only asks about the network should not also call validate_card_number',
+      'a network question on a valid card still validates first, then reports the brand',
     prompt: 'What card network is 4111111111111111 from?',
-    expectedTools: ['detect_card_type'],
+    expectedTools: ['validate_card_number', 'detect_card_type'],
     expectedResponse: {
       matches: /visa/i,
+      excludes: /invalid|not\s+(a\s+)?valid/i,
+    },
+  },
+  {
+    id: 'card-network-invalid',
+    description:
+      'a network question on an invalid card reports invalid and withholds the brand',
+    prompt: 'What card network is 4111111111111112 from?',
+    expectedTools: ['validate_card_number'],
+    expectedResponse: {
+      matches: /invalid|not\s+(a\s+)?valid/i,
+      excludes: /visa|mastercard|amex|american express|discover|diners|jcb/i,
     },
   },
   {

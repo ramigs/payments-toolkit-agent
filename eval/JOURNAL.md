@@ -211,3 +211,42 @@ held everywhere it mattered:
 Single-sample run, so the usual caveat about run-to-run variance
 applies — but the invalid-number path calling only one tool is the
 behavior the prompt now asks for, and it showed up cleanly.
+
+## 2026-08-29 — extend the invalid-card gate to network-only questions
+
+Follow-up to the change above. That change gated `detect_card_type` on a
+passing Luhn check only for *validity* questions; a network-only prompt
+("What card network is X from?") still called `detect_card_type` alone,
+with no validation — so asking for the brand of an invalid card got a
+confident "Visa" and no hint the number was bad.
+
+Decision: `detect_card_type` should never run without a passing Luhn
+check, whatever the user asked for. Merged the two card rules in
+`SYSTEM_PROMPT` into one: for *any* card-number question — valid?,
+network?, or both — call `validate_card_number` first; only if valid,
+then `detect_card_type` + name the brand; if invalid, say so and stop,
+"even when the network is all the user asked for".
+
+Trade-off noted and accepted: a pure BIN-lookup question ("what bank
+issues this range") is no longer answerable for a number that fails
+Luhn. Fine for a validation-first assistant — an invalid PAN's prefix
+may itself be a typo.
+
+Scenario updates (`eval/scenarios.ts`):
+
+- `card-network-only` → split into `card-network-valid` (valid PAN, now
+  expects `[validate_card_number, detect_card_type]`) and
+  `card-network-invalid` (invalid PAN, expects `[validate_card_number]`
+  only, response matches invalid and excludes all six brand names).
+
+### Verified
+
+Ran the five card scenarios (`pnpm run eval card-network-valid
+card-network-invalid card-valid-reports-brand card-check-both-tools
+card-invalid-fidelity`): 5/5 passed.
+
+- `card-network-invalid`: the agent called `validate_card_number` only,
+  reported the number as invalid, and named no brand — the new guard
+  holds.
+- `card-network-valid`: still validates first, then `detect_card_type`,
+  then names Visa — no regression to a single tool.
