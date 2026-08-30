@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Event } from '@google/adk';
 import {
   createChatApp,
+  isFailedValidation,
   type ChatRunner,
   type ChatMcpUi,
 } from '../../src/app.js';
@@ -91,6 +92,41 @@ async function readSse(
   }
   return events;
 }
+
+describe('isFailedValidation', () => {
+  it('is true for an MCP result whose structuredContent.valid is false', () => {
+    expect(
+      isFailedValidation({
+        content: [{ type: 'text', text: '{"valid":false}' }],
+        structuredContent: { valid: false, failureReason: 'checksum' },
+      }),
+    ).toBe(true);
+  });
+
+  it('is true for an already-unwrapped { valid: false }', () => {
+    expect(isFailedValidation({ valid: false })).toBe(true);
+  });
+
+  it('is false when the validation passed', () => {
+    expect(
+      isFailedValidation({ structuredContent: { valid: true, country: 'DE' } }),
+    ).toBe(false);
+  });
+
+  it('is false for a tool result with no valid field (e.g. detect_card_type)', () => {
+    expect(
+      isFailedValidation({
+        structuredContent: { network: 'Visa', cardNumber: '4111111111111111' },
+      }),
+    ).toBe(false);
+  });
+
+  it('is false for non-object results', () => {
+    expect(isFailedValidation(undefined)).toBe(false);
+    expect(isFailedValidation('nope')).toBe(false);
+    expect(isFailedValidation(null)).toBe(false);
+  });
+});
 
 describe('POST /chat/:runId/cancel', () => {
   it('404s when no run with that id is in flight', async () => {

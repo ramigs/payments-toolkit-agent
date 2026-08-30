@@ -58,6 +58,31 @@ async function emit(
 }
 
 /**
+ * Whether a completed tool result is a validation that explicitly failed
+ * (`structuredContent.valid === false`).
+ *
+ * Used to withhold the MCP Apps widget for invalid input — a preview tile
+ * for a bad IBAN is noise, not an error. This is the same "only when valid"
+ * rule the system prompt applies to `detect_card_type` (there the model just
+ * doesn't call the widget-bound tool); `validate_iban` both validates and
+ * carries the widget, so nothing upstream can withhold it and the check
+ * lands here instead.
+ */
+export function isFailedValidation(result: unknown): boolean {
+  const inner =
+    result !== null &&
+    typeof result === 'object' &&
+    'structuredContent' in result
+      ? (result as { structuredContent: unknown }).structuredContent
+      : result;
+  return (
+    inner !== null &&
+    typeof inner === 'object' &&
+    (inner as { valid?: unknown }).valid === false
+  );
+}
+
+/**
  * Builds the Hono app for the agent HTTP surface: `POST /chat` (single-turn,
  * SSE-streamed AG-UI events) plus the `POST /chat/:runId/cancel` side-channel.
  * All request-scoped state (the in-flight-run registry) lives inside this
@@ -178,10 +203,14 @@ export function createChatApp({ runner, mcpUi }: ChatAppDeps): Hono {
               await emit(stream, translator.toolResult(name, result, id));
 
               // If this tool advertises an MCP Apps widget, forward its
-              // resource so the frontend can render it alongside the result.
-              const widget = await mcpUi.forTool(name);
-              if (widget) {
-                await emit(stream, translator.uiResource(name, id, widget));
+              // resource so the frontend can render it alongside the result —
+              // but not for a validation that failed (an invalid IBAN gets no
+              // preview tile).
+              if (!isFailedValidation(result)) {
+                const widget = await mcpUi.forTool(name);
+                if (widget) {
+                  await emit(stream, translator.uiResource(name, id, widget));
+                }
               }
             }
             if (outcome.contentDelta) {
