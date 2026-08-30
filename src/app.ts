@@ -8,6 +8,8 @@ import { AgUiTranslator, extractPrompt, type AgUiEvent } from './ag-ui.js';
 import { createRunLogger, logToolCall, logToolResult } from './logging.js';
 import { describeEvent } from './trace.js';
 import type { UiResourcePayload } from './mcp-ui.js';
+import { pickSampleCards } from './sample-cards.js';
+import { pickSampleIbans } from './sample-ibans.js';
 
 export const APP_NAME = 'payments-toolkit-agent-http';
 const USER_ID = 'http-user';
@@ -84,13 +86,22 @@ export function isFailedValidation(result: unknown): boolean {
 
 /**
  * Builds the Hono app for the agent HTTP surface: `POST /chat` (single-turn,
- * SSE-streamed AG-UI events) plus the `POST /chat/:runId/cancel` side-channel.
- * All request-scoped state (the in-flight-run registry) lives inside this
- * closure, so each call returns an independent app — one for the server,
- * fresh ones per test.
+ * SSE-streamed AG-UI events), the `POST /chat/:runId/cancel` side-channel,
+ * and `GET /sample-cards` / `GET /sample-ibans` (static helpers the frontend
+ * uses to seed a "try a sample" picker). All request-scoped state (the
+ * in-flight-run registry) lives inside this closure, so each call returns an
+ * independent app — one for the server, fresh ones per test.
  */
 export function createChatApp({ runner, mcpUi }: ChatAppDeps): Hono {
   const app = new Hono();
+
+  // Random valid sample payment details for the frontend to offer as one-tap
+  // input: one test card per network, one IBAN per country. Both GET-only and
+  // stateless, with their own permissive CORS separate from the `/chat` POST
+  // rules below.
+  const sampleCors = cors({ origin: '*', allowMethods: ['GET', 'OPTIONS'] });
+  app.get('/sample-cards', sampleCors, (c) => c.json(pickSampleCards()));
+  app.get('/sample-ibans', sampleCors, (c) => c.json(pickSampleIbans()));
 
   // In-flight turn registry, keyed by AG-UI runId. A turn registers its
   // AbortController here for its lifetime so the side-channel

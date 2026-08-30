@@ -120,6 +120,59 @@ finished, or unknown `runId`). Dropping the `/chat` connection cancels the
 turn the same way — the endpoint just doesn't depend on the socket closing,
 which a proxy can delay.
 
+```
+GET /sample-cards
+```
+
+Returns one randomly chosen valid test card per network, for the frontend
+to offer as one-tap sample input:
+
+```json
+[
+  { "cardType": "Visa", "cardNumber": "4242424242424242" },
+  { "cardType": "Mastercard", "cardNumber": "5555555555554444" },
+  { "cardType": "American Express", "cardNumber": "378282246310005" },
+  { "cardType": "Discover", "cardNumber": "6011111111111117" },
+  { "cardType": "Diners Club", "cardNumber": "30569309025904" },
+  { "cardType": "JCB", "cardNumber": "3530111333300000" }
+]
+```
+
+Numbers are drawn from a curated pool of the standard processor test PANs
+(`src/sample-cards.ts`) — every one is Luhn-valid and on a real IIN range
+for its network, but they're not real accounts and authorize nothing. The
+pool is trusted as-is; nothing round-trips through the MCP server.
+
+```
+GET /sample-ibans
+```
+
+The IBAN counterpart — one randomly chosen valid IBAN per country:
+
+```json
+[
+  {
+    "countryCode": "DE",
+    "country": "Germany",
+    "iban": "DE89370400440532013000"
+  },
+  {
+    "countryCode": "GB",
+    "country": "United Kingdom",
+    "iban": "GB29NWBK60161331926819"
+  },
+  {
+    "countryCode": "FR",
+    "country": "France",
+    "iban": "FR1420041010050500013M02606"
+  }
+]
+```
+
+Drawn from the canonical registry example IBANs (`src/sample-ibans.ts`) —
+every one passes the mod-97 checksum and its country-specific length. Same
+trust model as `/sample-cards`: taken as-is, no MCP round-trip.
+
 The tool-call audit log (`logs/agent.log`, same masking as the CLI) is
 shared across all requests. The `@google/adk` MCP toolset opens a fresh
 stdio child per tool call rather than holding one open; the one persistent
@@ -181,6 +234,8 @@ src/
   trace.ts       # maps one ADK structured event to an EventOutcome (CLI, eval, and /chat)
   ag-ui.ts       # translates EventOutcome into official AG-UI events
   mcp-ui.ts      # resolves MCP Apps `ui://` widget resources for /chat
+  sample-cards.ts # curated valid test PANs per network, for GET /sample-cards
+  sample-ibans.ts # curated valid example IBANs per country, for GET /sample-ibans
   logging.ts     # structured, redacted tool-call logging (logs/agent.log)
   prompt.ts      # reads the user's prompt from argv or stdin (CLI only)
 eval/
