@@ -118,7 +118,8 @@ export const scenarios: Scenario[] = [
   },
   {
     id: 'iban-valid',
-    description: 'a well-known valid German IBAN should pass',
+    description:
+      'a well-known valid German IBAN should pass, with the country named in natural language',
     prompt: 'Is DE89370400440532013000 a valid IBAN?',
     expectedTools: ['validate_iban'],
     expectedArgs: (calls) =>
@@ -128,8 +129,8 @@ export const scenarios: Scenario[] = [
         (args) => args?.iban === 'DE89370400440532013000',
       ),
     expectedResponse: {
-      matches: /valid/i,
-      excludes: /invalid|not\s+(a\s+)?valid/i,
+      matches: /germany/i,
+      excludes: /invalid|not\s+(a\s+)?valid|country:\s*DE\b/i,
     },
   },
   {

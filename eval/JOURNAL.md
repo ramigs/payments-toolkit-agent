@@ -250,3 +250,27 @@ card-invalid-fidelity`): 5/5 passed.
   holds.
 - `card-network-valid`: still validates first, then `detect_card_type`,
   then names Visa — no regression to a single tool.
+
+## 2026-08-29 — IBAN country in natural language, not a bare code
+
+Reported behavior: "Is DE89370400440532013000 valid?" answered "The IBAN
+is valid (Country: DE)." The `validate_iban` result carries the country
+as an ISO code; the agent was relaying it verbatim as a "Country: DE"
+field.
+
+Fix (`SYSTEM_PROMPT` in `src/agent.ts`): added a response rule — refer
+to the country by name with the code in parentheses, e.g. "Germany
+(DE)", written into a sentence, not a bare field. No lookup table
+needed; the model knows the ISO-3166 names.
+
+Scenario update (`eval/scenarios.ts`): `iban-valid` response axis
+tightened — `matches` changed from `/valid/i` (which also matched
+"invalid" as a substring — the `excludes` was doing all the real work)
+to `/germany/i`, and `excludes` grew a `country:\s*DE\b` clause to catch
+a regression to the bare-code phrasing.
+
+### Verified
+
+Live run of "Is DE89 3704 0044 0532 0130 00 valid?" now answers "The
+IBAN is valid and belongs to Germany (DE)." `iban-valid`,
+`iban-invalid-fidelity`, and `multi-entity` all pass.
