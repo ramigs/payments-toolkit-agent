@@ -35,17 +35,19 @@ export const scenarios: Scenario[] = [
     prompt: 'Check this card: 4111111111111111',
     expectedTools: ['validate_card_number', 'detect_card_type'],
     expectedResponse: {
-      matches: /valid/i,
+      matches: /visa/i,
+      excludes: /invalid|not\s+(a\s+)?valid/i,
     },
   },
   {
-    id: 'card-luhn-only',
+    id: 'card-valid-reports-brand',
     description:
-      'a prompt that only asks about validity should not also call detect_card_type',
+      'a valid card number should also get a network lookup, with the brand named in the answer',
     prompt: 'Is 4111111111111111 a valid card number?',
-    expectedTools: ['validate_card_number'],
+    expectedTools: ['validate_card_number', 'detect_card_type'],
     expectedResponse: {
-      matches: /valid/i,
+      matches: /visa/i,
+      excludes: /invalid|not\s+(a\s+)?valid/i,
     },
   },
   {
@@ -62,13 +64,12 @@ export const scenarios: Scenario[] = [
     id: 'card-args-normalized',
     description:
       'dashes must be stripped from the card number before the tool call',
-    // Phrased as an unambiguous validity-only question (like
-    // card-luhn-only) rather than "check this card", specifically to
-    // avoid coupling this scenario's real assertion (arg normalization)
-    // to the separate, flakier question of whether an unqualified
-    // "check" prompt calls one tool or two.
+    // Real assertion here is arg normalization (dashes stripped before
+    // the call), checked on the expectedArgs axis. 4111...1111 is a
+    // valid Visa, so a validity question now also calls detect_card_type
+    // (see card-valid-reports-brand); expectedTools reflects that.
     prompt: 'Is 4111-1111-1111-1111 a valid card number?',
-    expectedTools: ['validate_card_number'],
+    expectedTools: ['validate_card_number', 'detect_card_type'],
     expectedArgs: (calls) =>
       calledWith(
         calls,
@@ -78,12 +79,14 @@ export const scenarios: Scenario[] = [
   },
   {
     id: 'card-invalid-fidelity',
-    description: 'a failed Luhn check must be relayed as invalid, not softened',
+    description:
+      'a failed Luhn check must be relayed as invalid, not softened — and an invalid number gets no network lookup or brand mention',
     prompt: 'Is 4111111111111112 a valid card number?',
     expectedTools: ['validate_card_number'],
     expectedResponse: {
       matches: /invalid|not\s+(a\s+)?valid|fails/i,
-      excludes: /\bis valid\b/i,
+      excludes:
+        /\bis valid\b|visa|mastercard|amex|american express|discover|diners|jcb/i,
     },
   },
   {
@@ -161,12 +164,12 @@ export const scenarios: Scenario[] = [
   {
     id: 'multi-entity',
     description:
-      'a prompt naming both a card and an IBAN should trigger both tools and address both in the response',
+      'a prompt naming a valid card and an IBAN should trigger card validation + network lookup and IBAN validation, addressing both in the response',
     prompt:
       'Is 5500005555555559 a valid card number, and is GB29NWBK60161331926819 a valid IBAN?',
-    expectedTools: ['validate_card_number', 'validate_iban'],
+    expectedTools: ['validate_card_number', 'detect_card_type', 'validate_iban'],
     expectedResponse: {
-      matches: /card/i,
+      matches: /mastercard/i,
     },
   },
 ];

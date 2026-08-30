@@ -157,3 +157,57 @@ was actually built to test.
 
 - Re-run `card-args-normalized` to confirm the reworded scenario is
   stable (not yet done — pausing further eval runs for now).
+
+## 2026-08-29 — product change: report the card brand on a valid card
+
+Not an eval finding — a deliberate behavior change. When the user asks
+whether a card number is valid, the agent should now also name the card
+network. Kept the "don't call what you weren't asked for" discipline
+from the 2026-08-24 fixes by making it **conditional and sequential**
+rather than reverting it: call `validate_card_number` first, and only
+call `detect_card_type` if the number came back valid. An invalid
+number stops at one tool and gets no brand mention — on an invalid PAN
+the prefix may itself be a typo, so naming a network there is
+misleading, not helpful.
+
+`SYSTEM_PROMPT` in `src/agent.ts`: replaced the "call validate_card_number
+alone for a validity question" rule with the validate-first-then-detect-
+if-valid rule above, plus "name the card network in your answer".
+
+Scenario updates (`eval/scenarios.ts`), to be verified on the next run:
+
+- `card-luhn-only` → renamed `card-valid-reports-brand`; `expectedTools`
+  now `[validate_card_number, detect_card_type]`, response must match
+  `/visa/i` and exclude invalid.
+- `card-check-both-tools` → response tightened from `/valid/i` to
+  `/visa/i` + excludes invalid (brand must actually appear).
+- `card-args-normalized` → `detect_card_type` added to `expectedTools`
+  (4111…1111 is a valid Visa); arg-normalization assertion unchanged.
+  Reworked the code comment — the one-tool-or-two decoupling rationale
+  no longer applies.
+- `card-invalid-fidelity` → `expectedTools` stays `[validate_card_number]`
+  (now also a guard that an invalid number does *not* trigger a network
+  lookup); `excludes` extended with the six network names.
+- `multi-entity` → `detect_card_type` added; 5500…5559 is a valid
+  Mastercard, response now expected to match `/mastercard/i`.
+- `card-network-only`, `card-malformed-tool-error`, both IBAN scenarios,
+  both out-of-scope scenarios, `ambiguous-clarify` — unaffected.
+
+### Verified — full run, 12/12 passed
+
+Ran the whole suite (`pnpm run eval`) right after the change. All 12
+scenarios passed on all axes. The sequential validate-then-detect order
+held everywhere it mattered:
+
+- `card-invalid-fidelity`: on the invalid PAN the agent called
+  `validate_card_number` only — no `detect_card_type`, no brand in the
+  response.
+- `multi-entity`: `validate_card_number` + `validate_iban` fired
+  together first, then `detect_card_type` fired **after** the card came
+  back valid — the conditional survived even with an IBAN check in the
+  same turn.
+- `card-network-only`: still `detect_card_type` alone.
+
+Single-sample run, so the usual caveat about run-to-run variance
+applies — but the invalid-number path calling only one tool is the
+behavior the prompt now asks for, and it showed up cleanly.
