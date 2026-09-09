@@ -21,8 +21,11 @@ project) will add an AG-UI-based frontend on top of this backend.
 - No new MCP tools — reuse the three existing ones (`validate_card_number`,
   `detect_card_type`, `validate_iban`) as-is.
 - No production deployment — local-first, Node process.
-- No auth/guardrail system yet — flagged as a fast-follow, not in scope
-  for the minimal version.
+- No guardrail system (content filtering, per-user rate limits / quotas)
+  yet — flagged as a fast-follow, not in scope for the minimal version.
+  (Access control landed later: `pnpm run start:http` now verifies a
+  Supabase bearer token on `/chat` and the sample routes — see
+  `src/auth.ts` — added alongside login in payments-toolkit-frontend.)
 
 ## Prerequisites
 

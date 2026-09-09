@@ -9,6 +9,10 @@ import {
   type ChatMcpUi,
   type ChatRunner,
 } from '../../src/app.js';
+import type { TokenVerifier } from '../../src/auth.js';
+
+/** Auth stub: accept every request. Real JWKS verification is covered in app.test.ts. */
+const allowAll: TokenVerifier = async () => ({ userId: 'test-user' });
 
 /** ISO 7064 mod-97-10 — mirrors the checksum `validate_iban` enforces. */
 function mod97Valid(iban: string): boolean {
@@ -78,7 +82,7 @@ describe('GET /sample-ibans', () => {
   } as unknown as ChatRunner;
 
   it('responds with one valid sample IBAN per country', async () => {
-    const app = createChatApp({ runner, mcpUi: noUi });
+    const app = createChatApp({ runner, mcpUi: noUi, verifyToken: allowAll });
     const res = await app.request('http://test/sample-ibans');
 
     expect(res.status).toBe(200);
@@ -96,7 +100,7 @@ describe('GET /sample-ibans', () => {
   });
 
   it('sets a permissive CORS header', async () => {
-    const app = createChatApp({ runner, mcpUi: noUi });
+    const app = createChatApp({ runner, mcpUi: noUi, verifyToken: allowAll });
     const res = await app.request('http://test/sample-ibans', {
       headers: { Origin: 'http://localhost:5173' },
     });

@@ -6,6 +6,12 @@ import {
   type ChatRunner,
   type ChatMcpUi,
 } from '../../src/app.js';
+import type { TokenVerifier } from '../../src/auth.js';
+
+/** Auth stub: accept every request, no token needed. The real Supabase/JWKS
+ *  verifier is `createSupabaseTokenVerifier`; the middleware contract it plugs
+ *  into (resolve = allow, throw = 401) is exercised in "POST /chat — auth". */
+const allowAll: TokenVerifier = async () => ({ userId: 'test-user' });
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -139,6 +145,7 @@ describe('POST /chat/:runId/cancel', () => {
         },
       },
       mcpUi: noUi,
+      verifyToken: allowAll,
     });
 
     const res = await app.request(post('/chat/never-started/cancel'));
@@ -161,6 +168,7 @@ describe('POST /chat — normal completion', () => {
         },
       },
       mcpUi: noUi,
+      verifyToken: allowAll,
     });
 
     const events = await readSse(
@@ -207,7 +215,7 @@ describe('POST /chat — explicit cancel mid-run', () => {
       },
     };
 
-    const app = createChatApp({ runner, mcpUi: noUi });
+    const app = createChatApp({ runner, mcpUi: noUi, verifyToken: allowAll });
 
     let cancelStatus = 0;
     const events = await readSse(
@@ -252,7 +260,7 @@ describe('POST /chat — client disconnect', () => {
       },
     };
 
-    const app = createChatApp({ runner, mcpUi: noUi });
+    const app = createChatApp({ runner, mcpUi: noUi, verifyToken: allowAll });
     const ac = new AbortController();
 
     const events = await readSse(
@@ -279,6 +287,7 @@ describe('POST /chat — request validation', () => {
     const app = createChatApp({
       runner: { sessionService: makeSessionService(), async *runAsync() {} },
       mcpUi: noUi,
+      verifyToken: allowAll,
     });
     const res = await app.request(post('/chat', { body: 'not json{' }));
     expect(res.status).toBe(400);
@@ -292,6 +301,7 @@ describe('POST /chat — request validation', () => {
         runAsync: runAsync as unknown as ChatRunner['runAsync'],
       },
       mcpUi: noUi,
+      verifyToken: allowAll,
     });
     const res = await app.request(
       post('/chat', {
@@ -307,5 +317,77 @@ describe('POST /chat — request validation', () => {
     );
     expect(res.status).toBe(400);
     expect(runAsync).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /chat — auth', () => {
+  const rejectAll: TokenVerifier = async () => {
+    throw new Error('bad token');
+  };
+
+  const idleRunner = (): ChatRunner => ({
+    sessionService: makeSessionService(),
+    runAsync: vi.fn() as unknown as ChatRunner['runAsync'],
+  });
+
+  it('401s POST /chat and never touches the runner when the token fails', async () => {
+    const runner = idleRunner();
+    const app = createChatApp({ runner, mcpUi: noUi, verifyToken: rejectAll });
+
+    const res = await app.request(post('/chat', { body: body('r-401') }));
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'Unauthorized' });
+    expect(runner.runAsync).not.toHaveBeenCalled();
+  });
+
+  it('401s the cancel side-channel and the sample routes too', async () => {
+    const app = createChatApp({
+      runner: idleRunner(),
+      mcpUi: noUi,
+      verifyToken: rejectAll,
+    });
+
+    const cancel = await app.request(post('/chat/whatever/cancel'));
+    expect(cancel.status).toBe(401);
+
+    const cards = await app.request('http://test/sample-cards');
+    expect(cards.status).toBe(401);
+
+    const ibans = await app.request('http://test/sample-ibans');
+    expect(ibans.status).toBe(401);
+  });
+
+  it('hands the Authorization header to the verifier and proceeds when it resolves', async () => {
+    const seen: Array<string | undefined> = [];
+    const verifyToken: TokenVerifier = async (authorization) => {
+      seen.push(authorization);
+      return { userId: 'u1' };
+    };
+    const app = createChatApp({
+      runner: {
+        sessionService: makeSessionService(),
+        async *runAsync() {
+          yield contentEvent('ok');
+        },
+      },
+      mcpUi: noUi,
+      verifyToken,
+    });
+
+    const events = await readSse(
+      await app.request(
+        post('/chat', {
+          body: body('r-hdr'),
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-token',
+          },
+        }),
+      ),
+    );
+
+    expect(seen).toEqual(['Bearer test-token']);
+    expect(events.map((e) => e.type)).toContain('RUN_FINISHED');
   });
 });

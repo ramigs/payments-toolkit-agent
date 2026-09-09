@@ -9,6 +9,10 @@ import {
   type ChatMcpUi,
   type ChatRunner,
 } from '../../src/app.js';
+import type { TokenVerifier } from '../../src/auth.js';
+
+/** Auth stub: accept every request. Real JWKS verification is covered in app.test.ts. */
+const allowAll: TokenVerifier = async () => ({ userId: 'test-user' });
 
 /** Standard Luhn checksum — mirrors what `validate_card_number` enforces. */
 function luhnValid(pan: string): boolean {
@@ -79,7 +83,7 @@ describe('GET /sample-cards', () => {
   } as unknown as ChatRunner;
 
   it('responds with one valid sample card per network', async () => {
-    const app = createChatApp({ runner, mcpUi: noUi });
+    const app = createChatApp({ runner, mcpUi: noUi, verifyToken: allowAll });
     const res = await app.request('http://test/sample-cards');
 
     expect(res.status).toBe(200);
@@ -96,10 +100,26 @@ describe('GET /sample-cards', () => {
   });
 
   it('sets a permissive CORS header', async () => {
-    const app = createChatApp({ runner, mcpUi: noUi });
+    const app = createChatApp({ runner, mcpUi: noUi, verifyToken: allowAll });
     const res = await app.request('http://test/sample-cards', {
       headers: { Origin: 'http://localhost:5173' },
     });
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
+  });
+
+  it('answers the CORS preflight the bearer token triggers (not a 404)', async () => {
+    const app = createChatApp({ runner, mcpUi: noUi, verifyToken: allowAll });
+    const res = await app.request('http://test/sample-cards', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://localhost:5173',
+        'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Headers': 'authorization',
+      },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get('access-control-allow-headers')).toContain(
+      'Authorization',
+    );
   });
 });

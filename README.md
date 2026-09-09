@@ -21,17 +21,26 @@ frontend on top of this backend's HTTP endpoint.
 - [`payments-toolkit-mcp`](https://github.com/ramigs/payments-toolkit-mcp)
   built locally (`pnpm run build` in that repo)
 - A Gemini API key (from [Google AI Studio](https://aistudio.google.com/app/apikey))
+- For `pnpm run start:http`: a [Supabase](https://supabase.com) project
+  (free tier) — `/chat` and the sample routes verify the bearer token the
+  frontend sends against it
 
 ## Setup
 
 ```bash
 pnpm install
 cp .env.example .env
-# then fill in GEMINI_API_KEY and MCP_SERVER_PATH in .env
+# then fill in GEMINI_API_KEY, MCP_SERVER_PATH, and SUPABASE_URL in .env
 ```
 
 `MCP_SERVER_PATH` is the absolute path to the built MCP server's entry
 point, e.g. `/path/to/payments-toolkit-mcp/dist/index.js`.
+
+`SUPABASE_URL` is your Supabase project URL (Project Settings → API),
+e.g. `https://xxxxxxxxxxxx.supabase.co`. The HTTP server fetches that
+project's JWKS to verify the Supabase session token
+`payments-toolkit-frontend` attaches to every `/chat` request; an
+unauthenticated request gets a 401. The CLI (`pnpm start`) doesn't use it.
 
 ## Usage
 
@@ -80,9 +89,17 @@ Listens on `PORT` (default `3001`) and exposes:
 ```
 POST /chat
 Content-Type: application/json
+Authorization: Bearer <Supabase access token>
 
 <an AG-UI RunAgentInput: { threadId, runId, messages, ... }>
 ```
+
+Every route (`/chat`, `/chat/:runId/cancel`, `/sample-cards`,
+`/sample-ibans`) requires a valid Supabase bearer token — the one
+`payments-toolkit-frontend` obtains at login and attaches to each request.
+The token's signature, expiry, issuer, and `authenticated` audience are
+checked against the project JWKS (`src/auth.ts`); anything missing or
+invalid gets a `401` before any model or MCP work.
 
 The request body is a full [AG-UI](https://docs.ag-ui.com) `RunAgentInput`
 (validated with `@ag-ui/core`'s `RunAgentInputSchema`); the prompt is taken
@@ -230,6 +247,7 @@ src/
   index.ts       # entry point: single-turn CLI runner
   http.ts        # entry point: HTTP server — wires deps into createChatApp, serve()
   app.ts         # Hono app factory: POST /chat (AG-UI/SSE) + POST /chat/:runId/cancel
+  auth.ts        # Supabase bearer-token verification (JWKS) — gates every route
   agent.ts       # agent definition: system prompt, MCP server registration
   trace.ts       # maps one ADK structured event to an EventOutcome (CLI, eval, and /chat)
   ag-ui.ts       # translates EventOutcome into official AG-UI events

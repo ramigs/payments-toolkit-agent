@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { InMemoryRunner } from '@google/adk';
 import { buildAgent, getMcpServerPath } from './agent.js';
+import { createSupabaseTokenVerifier } from './auth.js';
 import { McpUiResources } from './mcp-ui.js';
 import { APP_NAME, createChatApp } from './app.js';
 
@@ -9,6 +10,13 @@ const mcpServerPath = getMcpServerPath();
 if (!process.env.GEMINI_API_KEY) {
   throw new Error(
     'GEMINI_API_KEY is not set. Copy .env.example to .env and set it.',
+  );
+}
+if (!process.env.SUPABASE_URL) {
+  throw new Error(
+    'SUPABASE_URL is not set. Copy .env.example to .env and set it to your ' +
+      'Supabase project URL — /chat and the sample routes verify the bearer ' +
+      'token the frontend sends against that project.',
   );
 }
 
@@ -38,7 +46,9 @@ const runner = new InMemoryRunner({
 const mcpUi = new McpUiResources();
 await mcpUi.connect(mcpServerPath);
 
-const app = createChatApp({ runner, mcpUi });
+const verifyToken = createSupabaseTokenVerifier(process.env.SUPABASE_URL);
+
+const app = createChatApp({ runner, mcpUi, verifyToken });
 
 const port = Number(process.env.PORT ?? 3001);
 

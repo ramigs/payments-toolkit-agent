@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import type { MiddlewareHandler } from 'hono';
 import type { SSEStreamingApi } from 'hono/streaming';
 import { streamSSE } from 'hono/streaming';
 import { EventType, toStructuredEvents, type Event } from '@google/adk';
 import { RunAgentInputSchema } from '@ag-ui/core';
 import { AgUiTranslator, extractPrompt, type AgUiEvent } from './ag-ui.js';
+import type { TokenVerifier } from './auth.js';
 import { createRunLogger, logToolCall, logToolResult } from './logging.js';
 import { describeEvent } from './trace.js';
 import type { UiResourcePayload } from './mcp-ui.js';
@@ -48,6 +50,12 @@ export interface ChatMcpUi {
 export interface ChatAppDeps {
   runner: ChatRunner;
   mcpUi: ChatMcpUi;
+  /**
+   * Verifies the `Authorization` header on every route below. Injected (rather
+   * than built in here) so tests pass a stub instead of real JWTs; the server
+   * wires `createSupabaseTokenVerifier` in `http.ts`.
+   */
+  verifyToken: TokenVerifier;
 }
 
 async function emit(
@@ -92,16 +100,45 @@ export function isFailedValidation(result: unknown): boolean {
  * in-flight-run registry) lives inside this closure, so each call returns an
  * independent app — one for the server, fresh ones per test.
  */
-export function createChatApp({ runner, mcpUi }: ChatAppDeps): Hono {
+export function createChatApp({
+  runner,
+  mcpUi,
+  verifyToken,
+}: ChatAppDeps): Hono {
   const app = new Hono();
+
+  // Every route here is gated: the frontend attaches a Supabase bearer token
+  // (payments-toolkit-frontend's useAgentChat), so anything without a valid one
+  // — a direct curl, an expired session — gets a 401 before any model, MCP, or
+  // sample work. Runs after the per-route `cors()` middleware, which answers the
+  // preflight OPTIONS itself and never calls `next()`, so this only sees real
+  // requests. `verifyToken` resolves with the caller's `userId` — the hook for
+  // per-user rate limiting (PLAN step 6) — but nothing consumes it yet.
+  const requireAuth: MiddlewareHandler = async (c, next) => {
+    try {
+      await verifyToken(c.req.header('Authorization'));
+    } catch {
+      return c.json({ error: 'Unauthorized' }, 401);
+    }
+    return next();
+  };
 
   // Random valid sample payment details for the frontend to offer as one-tap
   // input: one test card per network, one IBAN per country. Both GET-only and
   // stateless, with their own permissive CORS separate from the `/chat` POST
-  // rules below.
-  const sampleCors = cors({ origin: '*', allowMethods: ['GET', 'OPTIONS'] });
-  app.get('/sample-cards', sampleCors, (c) => c.json(pickSampleCards()));
-  app.get('/sample-ibans', sampleCors, (c) => c.json(pickSampleIbans()));
+  // rules below — but the same auth gate. CORS + auth go on `app.use` (all
+  // methods), not the `app.get` handler: the bearer token makes these
+  // preflighted, and an `OPTIONS` would miss a GET-only registration and 404.
+  const sampleCors = cors({
+    origin: '*',
+    allowMethods: ['GET', 'OPTIONS'],
+    allowHeaders: ['Authorization'],
+  });
+  for (const path of ['/sample-cards', '/sample-ibans']) {
+    app.use(path, sampleCors, requireAuth);
+  }
+  app.get('/sample-cards', (c) => c.json(pickSampleCards()));
+  app.get('/sample-ibans', (c) => c.json(pickSampleIbans()));
 
   // In-flight turn registry, keyed by AG-UI runId. A turn registers its
   // AbortController here for its lifetime so the side-channel
@@ -116,16 +153,20 @@ export function createChatApp({ runner, mcpUi }: ChatAppDeps): Hono {
   // the only real consumer of this endpoint (see that repo's PLAN.md, step
   // 2) — cross-origin requests are the norm here, not an edge case, and the
   // client's fetchServerSentEvents adapter sends a custom X-Run-Id header
-  // that triggers a CORS preflight.
+  // plus an Authorization bearer token (Supabase session), both of which
+  // trigger a CORS preflight.
   const chatCors = cors({
     origin: '*',
     allowMethods: ['POST', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'X-Run-Id'],
+    allowHeaders: ['Authorization', 'Content-Type', 'X-Run-Id'],
   });
-  // `/chat` is path-exact in Hono; the cancel side-channel lives under
-  // `/chat/:runId/cancel`, so it needs its own glob registration.
+  // `/chat/*` also matches bare `/chat` in this Hono version, so the glob
+  // covers both the endpoint and the `/chat/:runId/cancel` side-channel; the
+  // exact `/chat` line is kept only so CORS is unmistakably attached to it.
+  // `cors` runs first (it answers the preflight and doesn't call `next()`), so
+  // `requireAuth` only ever sees a real request — once.
   app.use('/chat', chatCors);
-  app.use('/chat/*', chatCors);
+  app.use('/chat/*', chatCors, requireAuth);
 
   app.post('/chat', async (c) => {
     let body: unknown;
