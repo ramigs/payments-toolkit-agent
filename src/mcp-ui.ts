@@ -87,7 +87,7 @@ export class McpUiResources {
     const summary = [...this.uriByTool]
       .map(([name, uri]) => `${name} -> ${uri}`)
       .join(', ');
-    console.error(
+    console.log(
       `[boot] MCP Apps UI resources: ${summary || '(none advertised)'}`,
     );
   }

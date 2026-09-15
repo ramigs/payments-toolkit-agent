@@ -125,7 +125,7 @@ export async function verifyMcpServer(client: Client): Promise<void> {
   const { resources } = await client.listResources();
   const { prompts } = await client.listPrompts();
 
-  console.error(
+  console.log(
     `[boot] connected to ${MCP_SERVER_NAME}: tools=[${tools.map((t) => t.name).join(', ')}] ` +
       `resources=[${resources.map((r) => r.name).join(', ')}] ` +
       `prompts=[${prompts.map((p) => p.name).join(', ')}]`,

@@ -53,13 +53,13 @@ const app = createChatApp({ runner, mcpUi, verifyToken });
 const port = Number(process.env.PORT ?? 3001);
 
 const server = serve({ fetch: app.fetch, port }, (info) => {
-  console.error(
+  console.log(
     `[boot] payments-toolkit-agent HTTP server listening on port ${info.port}`,
   );
 });
 
 async function shutdown(): Promise<void> {
-  console.error('[shutdown] closing MCP connections...');
+  console.log('[shutdown] closing MCP connections...');
   await Promise.allSettled([mcpToolset.close(), mcpUi.close()]);
   server.close(() => process.exit(0));
 }

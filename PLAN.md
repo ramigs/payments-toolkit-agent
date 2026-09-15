@@ -379,9 +379,22 @@ into one `AbortSignal` per turn via `AbortSignal.any`:
   the per-run logger (`run started` / `run finished` / `run cancelled` with
   `trigger: "cancel-endpoint" | "client-disconnect"` / `run error`), and a
   cancelled turn also prints a `[cancel] run <runId> aborted (<trigger>)`
-  line to stderr (`[boot]`/`[shutdown]` style); the cancel endpoint logs
-  `[cancel] no in-flight run <runId>` on a `404`. Before this the tool-call
-  audit was the only per-request logging and cancellation was silent.
+  line to stdout (`[boot]`/`[shutdown]` style — see the note on this below);
+  the cancel endpoint logs `[cancel] no in-flight run <runId>` on a `404`.
+  Before this the tool-call audit was the only per-request logging and
+  cancellation was silent.
+
+**Stdout vs stderr, revisited on deploy:** all of this agent's own
+`[boot]`/`[shutdown]`/`[cancel]` lines originally went to stderr, copying
+`payments-toolkit-mcp`'s "log to stderr, let the environment route it"
+convention. That convention exists there for a hard reason — stdout is
+reserved for JSON-RPC frames on the MCP server's stdio transport — which
+doesn't apply to this agent's own process. Once deployed to Railway, its
+log viewer treats anything on stderr as an error regardless of content, so
+these purely informational lines were showing up as errors with nothing
+actually wrong. Moved them to `console.log` (stdout); genuine warnings
+(`warnIfMissing` in `src/agent.ts`, the missing-resource-content case in
+`src/mcp-ui.ts`) stay on `console.error` (stderr).
 - Verified with `curl` (explicit cancel mid-run, cancel-after-finish,
   client disconnect) and `tests/unit/app.test.ts`, which drives the app via
   Hono's `app.request()` with a fake generator runner: normal completion,

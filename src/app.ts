@@ -296,7 +296,7 @@ export function createChatApp({
             ? 'cancel-endpoint'
             : 'client-disconnect';
           runLog.info({ trigger }, 'run cancelled');
-          console.error(`[cancel] run ${runId} aborted (${trigger})`);
+          console.log(`[cancel] run ${runId} aborted (${trigger})`);
           try {
             await emit(stream, translator.runError('cancelled'));
           } catch {
@@ -332,7 +332,7 @@ export function createChatApp({
     if (!controller) {
       // Already finished, already cancelled, or never existed — all no-ops
       // from the caller's point of view.
-      console.error(`[cancel] no in-flight run ${runId}`);
+      console.log(`[cancel] no in-flight run ${runId}`);
       return c.json({ error: 'No in-flight run with that runId.' }, 404);
     }
     controller.abort();
