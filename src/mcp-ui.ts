@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { verifyMcpServer } from './agent.js';
+import { mcpServerEnv, verifyMcpServer } from './agent.js';
 
 /**
  * The `ui-resource` payload this agent forwards to the frontend on an AG-UI
@@ -67,7 +67,11 @@ export class McpUiResources {
       version: '0.1.0',
     });
     await client.connect(
-      new StdioClientTransport({ command: 'node', args: [mcpServerPath] }),
+      new StdioClientTransport({
+        command: 'node',
+        args: [mcpServerPath],
+        env: mcpServerEnv(),
+      }),
     );
     this.client = client;
 

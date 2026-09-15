@@ -73,6 +73,20 @@ export function getMcpServerPath(): string {
   return path;
 }
 
+/**
+ * `StdioClientTransport` only forwards a curated allowlist of env vars to
+ * the spawned MCP server child by default (see
+ * `getDefaultEnvironment()`/`DEFAULT_INHERITED_ENV_VARS` in the MCP SDK's
+ * `stdio.js`), which excludes `NODE_ENV`. Without it,
+ * payments-toolkit-mcp's own `isProd` logger check is always false in the
+ * child, so it always reaches for `pino-pretty` — a devDependency that
+ * isn't installed in a production build. Passed as `env` to every stdio
+ * spawn below so the child's production posture matches the parent's.
+ */
+export function mcpServerEnv(): Record<string, string> {
+  return process.env.NODE_ENV ? { NODE_ENV: process.env.NODE_ENV } : {};
+}
+
 export function buildAgent(mcpServerPath: string): {
   agent: LlmAgent;
   mcpToolset: MCPToolset;
@@ -83,6 +97,7 @@ export function buildAgent(mcpServerPath: string): {
       serverParams: {
         command: 'node',
         args: [mcpServerPath],
+        env: mcpServerEnv(),
       },
     },
     [...TOOL_NAMES],
@@ -135,6 +150,7 @@ export async function discoverMcpServer(mcpServerPath: string): Promise<void> {
   const transport = new StdioClientTransport({
     command: 'node',
     args: [mcpServerPath],
+    env: mcpServerEnv(),
   });
 
   try {
