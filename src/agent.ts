@@ -14,7 +14,7 @@ const RESOURCE_NAMES = ['card_networks'] as const;
 
 const PROMPT_NAMES = ['check_payment_details'] as const;
 
-const ADK_MODEL = 'gemini-3.5-flash-lite';
+export const ADK_MODEL = 'gemini-3.5-flash-lite';
 
 const SYSTEM_PROMPT = `You are a narrow payments-validation assistant. Your only job is to help
 users validate payment details using the tools available to you:

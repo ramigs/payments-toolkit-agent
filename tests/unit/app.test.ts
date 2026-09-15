@@ -6,6 +6,7 @@ import {
   type ChatRunner,
   type ChatMcpUi,
 } from '../../src/app.js';
+import { ADK_MODEL } from '../../src/agent.js';
 import type { TokenVerifier } from '../../src/auth.js';
 
 /** Auth stub: accept every request, no token needed. The real Supabase/JWKS
@@ -341,7 +342,7 @@ describe('POST /chat — auth', () => {
     expect(runner.runAsync).not.toHaveBeenCalled();
   });
 
-  it('401s the cancel side-channel and the sample routes too', async () => {
+  it('401s the cancel side-channel and the sample/model-info routes too', async () => {
     const app = createChatApp({
       runner: idleRunner(),
       mcpUi: noUi,
@@ -356,6 +357,9 @@ describe('POST /chat — auth', () => {
 
     const ibans = await app.request('http://test/sample-ibans');
     expect(ibans.status).toBe(401);
+
+    const modelInfo = await app.request('http://test/model-info');
+    expect(modelInfo.status).toBe(401);
   });
 
   it('hands the Authorization header to the verifier and proceeds when it resolves', async () => {
@@ -389,5 +393,23 @@ describe('POST /chat — auth', () => {
 
     expect(seen).toEqual(['Bearer test-token']);
     expect(events.map((e) => e.type)).toContain('RUN_FINISHED');
+  });
+});
+
+describe('GET /model-info', () => {
+  it('returns the model the agent is configured with', async () => {
+    const app = createChatApp({
+      runner: {
+        sessionService: makeSessionService(),
+        runAsync: vi.fn() as unknown as ChatRunner['runAsync'],
+      },
+      mcpUi: noUi,
+      verifyToken: allowAll,
+    });
+
+    const res = await app.request('http://test/model-info');
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ model: ADK_MODEL });
   });
 });

@@ -5,6 +5,7 @@ import type { SSEStreamingApi } from 'hono/streaming';
 import { streamSSE } from 'hono/streaming';
 import { EventType, toStructuredEvents, type Event } from '@google/adk';
 import { RunAgentInputSchema } from '@ag-ui/core';
+import { ADK_MODEL } from './agent.js';
 import { AgUiTranslator, extractPrompt, type AgUiEvent } from './ag-ui.js';
 import type { TokenVerifier } from './auth.js';
 import { createRunLogger, logToolCall, logToolResult } from './logging.js';
@@ -95,8 +96,10 @@ export function isFailedValidation(result: unknown): boolean {
 /**
  * Builds the Hono app for the agent HTTP surface: `POST /chat` (single-turn,
  * SSE-streamed AG-UI events), the `POST /chat/:runId/cancel` side-channel,
- * and `GET /sample-cards` / `GET /sample-ibans` (static helpers the frontend
- * uses to seed a "try a sample" picker). All request-scoped state (the
+ * `GET /sample-cards` / `GET /sample-ibans` (static helpers the frontend
+ * uses to seed a "try a sample" picker), and `GET /model-info` (the model
+ * name, for the frontend to display once under the chat box rather than on
+ * every streamed run). All request-scoped state (the
  * in-flight-run registry) lives inside this closure, so each call returns an
  * independent app — one for the server, fresh ones per test.
  */
@@ -123,22 +126,24 @@ export function createChatApp({
     return next();
   };
 
-  // Random valid sample payment details for the frontend to offer as one-tap
-  // input: one test card per network, one IBAN per country. Both GET-only and
-  // stateless, with their own permissive CORS separate from the `/chat` POST
-  // rules below — but the same auth gate. CORS + auth go on `app.use` (all
-  // methods), not the `app.get` handler: the bearer token makes these
-  // preflighted, and an `OPTIONS` would miss a GET-only registration and 404.
+  // Static GET helpers: sample payment details for the frontend's one-tap
+  // input (one test card per network, one IBAN per country) and the model
+  // name for its "powered by" display. All GET-only and stateless, with
+  // their own permissive CORS separate from the `/chat` POST rules below —
+  // but the same auth gate. CORS + auth go on `app.use` (all methods), not
+  // the `app.get` handler: the bearer token makes these preflighted, and an
+  // `OPTIONS` would miss a GET-only registration and 404.
   const sampleCors = cors({
     origin: '*',
     allowMethods: ['GET', 'OPTIONS'],
     allowHeaders: ['Authorization'],
   });
-  for (const path of ['/sample-cards', '/sample-ibans']) {
+  for (const path of ['/sample-cards', '/sample-ibans', '/model-info']) {
     app.use(path, sampleCors, requireAuth);
   }
   app.get('/sample-cards', (c) => c.json(pickSampleCards()));
   app.get('/sample-ibans', (c) => c.json(pickSampleIbans()));
+  app.get('/model-info', (c) => c.json({ model: ADK_MODEL }));
 
   // In-flight turn registry, keyed by AG-UI runId. A turn registers its
   // AbortController here for its lifetime so the side-channel
