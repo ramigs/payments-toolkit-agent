@@ -21,9 +21,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "deploy": "scripts/bump-mcp-commit.sh && railway up",
-    "stop": "railway down",
-    "scale:down": "railway scale us-west=0",
-    "scale:up": "railway scale us-west=1"
+    "stop": "railway down"
   },
   "keywords": [],
   "author": "",
