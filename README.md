@@ -1,34 +1,3 @@
-<!-- START doctoc generated TOC please keep comment here to allow auto update -->
-<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
-
-- [payments-toolkit-agent](#payments-toolkit-agent)
-  - [Prerequisites](#prerequisites)
-  - [Setup](#setup)
-    - [Environment variables](#environment-variables)
-  - [Usage](#usage)
-    - [CLI](#cli)
-    - [HTTP server](#http-server)
-      - [POST /chat](#post-chat)
-      - [POST /chat/:runId/cancel](#post-chatrunidcancel)
-      - [GET /sample-cards](#get-sample-cards)
-      - [GET /sample-ibans](#get-sample-ibans)
-      - [GET /model-info](#get-model-info)
-    - [Type-checking, linting, formatting, building](#type-checking-linting-formatting-building)
-  - [Deploy](#deploy)
-  - [Logging](#logging)
-  - [Eval suite](#eval-suite)
-  - [Unit tests](#unit-tests)
-  - [TODO](#todo)
-    - [MCP connection over HTTP](#mcp-connection-over-http)
-    - [AG-UI translation](#ag-ui-translation)
-    - [Guardrails against runaway spend](#guardrails-against-runaway-spend)
-    - [Deployment hardening](#deployment-hardening)
-    - [Logging destination](#logging-destination)
-    - [Eval hardening](#eval-hardening)
-
-<!-- END doctoc generated TOC please keep comment here to allow auto update -->
-
 # payments-toolkit-agent
 
 Payments Toolkit is a validation assistant for **card numbers** and **IBANs**.
@@ -50,6 +19,36 @@ This backend is consumed by
 [payments-toolkit-frontend](https://github.com/ramigs/payments-toolkit-frontend),
 an AG-UI-based frontend that talks to it over the HTTP endpoint documented
 below.
+
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [Prerequisites](#prerequisites)
+- [Setup](#setup)
+  - [Environment variables](#environment-variables)
+- [Usage](#usage)
+  - [CLI](#cli)
+  - [HTTP server](#http-server)
+    - [POST /chat](#post-chat)
+    - [POST /chat/:runId/cancel](#post-chatrunidcancel)
+    - [GET /sample-cards](#get-sample-cards)
+    - [GET /sample-ibans](#get-sample-ibans)
+    - [GET /model-info](#get-model-info)
+  - [Type-checking, linting, formatting, building](#type-checking-linting-formatting-building)
+- [Deploy](#deploy)
+- [Logging](#logging)
+- [Eval suite](#eval-suite)
+- [Unit tests](#unit-tests)
+- [TODO](#todo)
+  - [MCP connection over HTTP](#mcp-connection-over-http)
+  - [AG-UI translation](#ag-ui-translation)
+  - [Guardrails against runaway spend](#guardrails-against-runaway-spend)
+  - [Deployment hardening](#deployment-hardening)
+  - [Logging destination](#logging-destination)
+  - [Eval hardening](#eval-hardening)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ## Prerequisites
 
