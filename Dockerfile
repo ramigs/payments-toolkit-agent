@@ -8,7 +8,7 @@
 # latest HEAD before deploying (scripts/bump-mcp-commit.sh).
 # ---------------------------------------------------------------------------
 FROM node:24.18.0-slim AS mcp-builder
-ARG MCP_COMMIT=e1587c0de82c7ca5d323cf867880d8750e73a2f9
+ARG MCP_COMMIT=0425ee443da1473e05885838a0db1208b770cb6f
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /mcp
