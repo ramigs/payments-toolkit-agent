@@ -1,6 +1,6 @@
 # Eval journal
 
-Running log of what the step-5 eval suite (`eval/scenarios.ts` +
+Running log of what the eval suite (`eval/scenarios.ts` +
 `eval/run-eval.ts`) has actually found, kept as raw material for a
 write-up later. Newest entries at the bottom. Each entry: what we saw,
 why, what we changed, how we checked it.
@@ -25,8 +25,9 @@ All three manual runs were individually correct but textually
 different, and the original run got unlucky with an empty one. This is
 exactly the run-to-run variance a single-sample-per-scenario eval is
 exposed to (we deliberately chose not to build repeated-trial/pass-rate
-scoring for the first version — see PLAN.md step 5). Re-ran the full
-suite once more to separate real findings from noise: 8/12 passed.
+scoring for the first version — see the "Eval hardening" TODO in the
+README). Re-ran the full suite once more to separate real findings from
+noise: 8/12 passed.
 
 Real findings from the second run:
 

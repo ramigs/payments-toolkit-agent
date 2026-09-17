@@ -116,7 +116,8 @@ export function createChatApp({
   // sample work. Runs after the per-route `cors()` middleware, which answers the
   // preflight OPTIONS itself and never calls `next()`, so this only sees real
   // requests. `verifyToken` resolves with the caller's `userId` — the hook for
-  // per-user rate limiting (PLAN step 6) — but nothing consumes it yet.
+  // per-user rate limiting (see the README's TODO section) — but nothing
+  // consumes it yet.
   const requireAuth: MiddlewareHandler = async (c, next) => {
     try {
       await verifyToken(c.req.header('Authorization'));
@@ -155,11 +156,10 @@ export function createChatApp({
   const inFlightRuns = new Map<string, AbortController>();
 
   // The frontend (payments-toolkit-frontend, a separate localhost origin) is
-  // the only real consumer of this endpoint (see that repo's PLAN.md, step
-  // 2) — cross-origin requests are the norm here, not an edge case, and the
-  // client's fetchServerSentEvents adapter sends a custom X-Run-Id header
-  // plus an Authorization bearer token (Supabase session), both of which
-  // trigger a CORS preflight.
+  // the only real consumer of this endpoint — cross-origin requests are the
+  // norm here, not an edge case, and the client's fetchServerSentEvents
+  // adapter sends a custom X-Run-Id header plus an Authorization bearer
+  // token (Supabase session), both of which trigger a CORS preflight.
   const chatCors = cors({
     origin: '*',
     allowMethods: ['POST', 'OPTIONS'],

@@ -1,48 +1,103 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [payments-toolkit-agent](#payments-toolkit-agent)
+  - [Prerequisites](#prerequisites)
+  - [Setup](#setup)
+    - [Environment variables](#environment-variables)
+  - [Usage](#usage)
+    - [CLI](#cli)
+    - [HTTP server](#http-server)
+      - [POST /chat](#post-chat)
+      - [POST /chat/:runId/cancel](#post-chatrunidcancel)
+      - [GET /sample-cards](#get-sample-cards)
+      - [GET /sample-ibans](#get-sample-ibans)
+      - [GET /model-info](#get-model-info)
+    - [Type-checking, linting, formatting, building](#type-checking-linting-formatting-building)
+  - [Deploy](#deploy)
+  - [Logging](#logging)
+  - [Eval suite](#eval-suite)
+  - [Unit tests](#unit-tests)
+  - [TODO](#todo)
+    - [MCP connection over HTTP](#mcp-connection-over-http)
+    - [AG-UI translation](#ag-ui-translation)
+    - [Guardrails against runaway spend](#guardrails-against-runaway-spend)
+    - [Deployment hardening](#deployment-hardening)
+    - [Logging destination](#logging-destination)
+    - [Eval hardening](#eval-hardening)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # payments-toolkit-agent
 
-An agent backend, built with [Google ADK](https://google.github.io/adk-docs/),
-that connects to [payments-toolkit-mcp](https://github.com/ramigs/payments-toolkit-mcp)
-as an MCP server and exposes it as a conversational interface. It's a
-companion project — the MCP server stays untouched; this repo just adds an
-agent layer on top of it. See [PLAN.md](./PLAN.md) for the full step-by-step
-walkthrough, including the reasoning behind each design decision.
+Payments Toolkit is a validation assistant for **card numbers** and **IBANs**.
+Ask in plain English — it checks card numbers (Luhn checksum and card network)
+and IBANs (format, country length, checksum) by running real validators.
 
-This is step 1 of 2: a local backend (CLI and HTTP+SSE) that proves out the
-full loop (user request → agent reasoning → MCP tool call → tool result →
-agent response) with visibility into each step. Step 2
-(`payments-toolkit-frontend`, a separate project) adds an AG-UI-based
-frontend on top of this backend's HTTP endpoint.
+Learn more: [What I learned building my first end-to-end AI
+app](https://ramigs.dev/blog/what-i-learned-building-my-first-end-to-end-ai-app/)
+
+This is the agent backend, built with [Google
+ADK](https://google.github.io/adk-docs/), that connects to
+[payments-toolkit-mcp](https://github.com/ramigs/payments-toolkit-mcp) as an MCP
+server.
+
+The agent is scoped narrowly to payment-detail validation (card numbers, card
+types, IBANs) via its system prompt (`src/agent.ts`) and declines anything else.
+
+This backend is consumed by
+[payments-toolkit-frontend](https://github.com/ramigs/payments-toolkit-frontend),
+an AG-UI-based frontend that talks to it over the HTTP endpoint documented
+below.
 
 ## Prerequisites
 
-- Node.js 20.3+ (for `AbortSignal.any`; project developed against v24,
-  pinned via `.nvmrc`)
+- Node.js 20.3+ (for `AbortSignal.any`; project developed against v24, pinned
+  via `.nvmrc`)
 - [pnpm](https://pnpm.io)
-- [`payments-toolkit-mcp`](https://github.com/ramigs/payments-toolkit-mcp)
-  built locally (`pnpm run build` in that repo)
-- A Gemini API key (from [Google AI Studio](https://aistudio.google.com/app/apikey))
-- For `pnpm run start:http`: a [Supabase](https://supabase.com) project
-  (free tier) — `/chat` and the sample routes verify the bearer token the
-  frontend sends against it
+- [`payments-toolkit-mcp`](https://github.com/ramigs/payments-toolkit-mcp) built
+  locally (`pnpm run build` in that repo)
+- A Gemini API key (from [Google AI
+  Studio](https://aistudio.google.com/app/apikey))
+- For `pnpm run start:http`: a [Supabase](https://supabase.com) project (free
+  tier) — `/chat` and the sample routes verify the bearer token the frontend
+  sends against it
 
 ## Setup
 
 ```bash
 pnpm install
-cp .env.example .env
-# then fill in GEMINI_API_KEY, MCP_SERVER_PATH, and SUPABASE_URL in .env
 ```
 
-`MCP_SERVER_PATH` is the absolute path to the built MCP server's entry
-point, e.g. `/path/to/payments-toolkit-mcp/dist/index.js`.
+### Environment variables
 
-`SUPABASE_URL` is your Supabase project URL (Project Settings → API),
-e.g. `https://xxxxxxxxxxxx.supabase.co`. The HTTP server fetches that
-project's JWKS to verify the Supabase session token
-`payments-toolkit-frontend` attaches to every `/chat` request; an
-unauthenticated request gets a 401. The CLI (`pnpm start`) doesn't use it.
+```bash
+cp .env.example .env
+```
+
+Then fill in `.env`:
+
+- `GEMINI_API_KEY` — from [Google AI
+  Studio](https://aistudio.google.com/app/apikey), used by Google ADK.
+- `MCP_SERVER_PATH` — the absolute path to the built MCP server's entry point,
+  e.g. `/path/to/payments-toolkit-mcp/dist/index.js` (run `pnpm run build` in
+  that repo first).
+- `SUPABASE_URL` — required for `pnpm run start:http`: your Supabase project URL
+  (Project Settings → API), e.g. `https://xxxxxxxxxxxx.supabase.co`. The HTTP
+  server fetches that project's JWKS to verify the Supabase session token
+  `payments-toolkit-frontend` attaches to every `/chat` request; an
+  unauthenticated request gets a 401. The CLI (`pnpm start`) doesn't use it.
+- `PORT` — optional, default `3001` (only used by `pnpm run start:http`).
+
+`.env` is gitignored.
 
 ## Usage
+
+There are two ways to run the agent: a single-turn CLI call (below), or a
+long-lived HTTP server for the frontend to talk to.
+
+### CLI
 
 Run a single agent turn against the real MCP server:
 
@@ -50,33 +105,15 @@ Run a single agent turn against the real MCP server:
 pnpm start "Is DE89370400440532013000 a valid IBAN?"
 ```
 
-This is intentionally not a REPL — one request in, one full trace out. Each
-run prints, in order:
+This is intentionally not a REPL — one request in, one full trace out. Each run
+prints, in order:
 
 1. The discovered MCP tools/resources/prompts (a boot-time sanity check)
 2. Each tool call the agent makes, with arguments
 3. Each tool's raw result
 4. The agent's final natural-language response
 
-The agent is scoped narrowly to payment-detail validation (card numbers,
-card types, IBANs) via its system prompt (`src/agent.ts`) and declines
-anything else.
-
-### Logging
-
-Every tool call is also logged as structured JSON to `logs/agent.log`
-(gitignored), with sensitive arguments (card numbers, IBANs) masked to
-their last 4 characters. Tail it in a readable form with:
-
-```bash
-tail -f logs/agent.log | pnpm exec pino-pretty
-```
-
-This log is for human/audit observability — the eval suite below does
-**not** read it, since the masking would hide argument details some
-scenarios need to check (see `eval/run-eval.ts`).
-
-## HTTP server
+### HTTP server
 
 Run the agent as a long-lived HTTP server instead of a one-shot CLI call:
 
@@ -84,125 +121,145 @@ Run the agent as a long-lived HTTP server instead of a one-shot CLI call:
 pnpm run start:http
 ```
 
-Listens on `PORT` (default `3001`) and exposes:
+Listens on `PORT` (default `3001`). Every route requires a valid Supabase bearer
+token — the one `payments-toolkit-frontend` obtains at login and attaches to
+each request. The token's signature, expiry, issuer, and `authenticated`
+audience are checked against the project JWKS (`src/auth.ts`); anything missing
+or invalid gets a `401` before any model, MCP, or sample-data work.
+
+- [`POST /chat`](#post-chat)
+- [`POST /chat/:runId/cancel`](#post-chatrunidcancel)
+- [`GET /sample-cards`](#get-sample-cards)
+- [`GET /sample-ibans`](#get-sample-ibans)
+- [`GET /model-info`](#get-model-info)
+
+#### POST /chat
 
 ```
-POST /chat
 Content-Type: application/json
 Authorization: Bearer <Supabase access token>
 
 <an AG-UI RunAgentInput: { threadId, runId, messages, ... }>
 ```
 
-Every route (`/chat`, `/chat/:runId/cancel`, `/sample-cards`,
-`/sample-ibans`) requires a valid Supabase bearer token — the one
-`payments-toolkit-frontend` obtains at login and attaches to each request.
-The token's signature, expiry, issuer, and `authenticated` audience are
-checked against the project JWKS (`src/auth.ts`); anything missing or
-invalid gets a `401` before any model or MCP work.
-
 The request body is a full [AG-UI](https://docs.ag-ui.com) `RunAgentInput`
-(validated with `@ag-ui/core`'s `RunAgentInputSchema`); the prompt is taken
-from the last `role: "user"` message. The response is a Server-Sent Events
-stream of official AG-UI events — one full agent turn per request, no
-conversation state kept between requests (the frontend project owns
-session/thread identity if it needs multi-turn memory):
+(validated with `@ag-ui/core`'s `RunAgentInputSchema`); the prompt is taken from
+the last `role: "user"` message. The response is a Server-Sent Events stream of
+official AG-UI events — one full agent turn per request, no conversation state
+kept between requests (the frontend project owns session/thread identity if it
+needs multi-turn memory):
 
 ```
-data: {"type":"RUN_STARTED","threadId":"...","runId":"..."}
-data: {"type":"TOOL_CALL_START","toolCallId":"...","toolCallName":"validate_iban", ...}
-data: {"type":"TOOL_CALL_ARGS","toolCallId":"...","delta":"{\"iban\":\"DE89...\"}"}
-data: {"type":"TOOL_CALL_END","toolCallId":"..."}
-data: {"type":"TOOL_CALL_RESULT","toolCallId":"...","content":"{...}"}
-data: {"type":"TEXT_MESSAGE_START","messageId":"...","role":"assistant"}
-data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"...","delta":"Yes, DE89... is a valid IBAN."}
-data: {"type":"TEXT_MESSAGE_END","messageId":"..."}
-data: {"type":"RUN_FINISHED","threadId":"...","runId":"..."}
+RUN_STARTED → TOOL_CALL_START/ARGS/END → TOOL_CALL_RESULT →
+TEXT_MESSAGE_START/CONTENT/END → RUN_FINISHED
 ```
 
 A tool that advertises an [MCP Apps](https://github.com/modelcontextprotocol)
-widget (currently `detect_card_type`) also emits a `CUSTOM` event with
-`name: "ui-resource"` after its `TOOL_CALL_RESULT`, carrying the widget
-resource for the frontend to render. On failure, a terminal
+widget (currently `detect_card_type`) also emits a `CUSTOM` event with `name:
+"ui-resource"` after its `TOOL_CALL_RESULT`, carrying the widget resource for
+the frontend to render. On failure, a terminal
 `{"type":"RUN_ERROR","message":"..."}` replaces `RUN_FINISHED`.
 
-```
-POST /chat/:runId/cancel
-```
+#### POST /chat/:runId/cancel
 
-Cancels an in-flight turn: aborts the model request (and any in-flight MCP
-tool call), then closes the stream with `RUN_ERROR` / `"cancelled"`.
-Returns `202` if a run was aborted, `404` if none is in flight (already
-finished, or unknown `runId`). Dropping the `/chat` connection cancels the
-turn the same way — the endpoint just doesn't depend on the socket closing,
-which a proxy can delay.
+Cancels an in-flight turn: aborts the model request (and any in-flight MCP tool
+call), then closes the stream with `RUN_ERROR` / `"cancelled"`. Returns `202` if
+a run was aborted, `404` if none is in flight (already finished, or unknown
+`runId`). Dropping the `/chat` connection cancels the turn the same way — the
+endpoint just doesn't depend on the socket closing, which a proxy can delay.
 
-```
-GET /sample-cards
-```
+#### GET /sample-cards
 
-Returns one randomly chosen valid test card per network, for the frontend
-to offer as one-tap sample input:
+Returns one randomly chosen valid test card per network, for the frontend to
+offer as one-tap sample input:
 
 ```json
-[
-  { "cardType": "Visa", "cardNumber": "4242424242424242" },
-  { "cardType": "Mastercard", "cardNumber": "5555555555554444" },
-  { "cardType": "American Express", "cardNumber": "378282246310005" },
-  { "cardType": "Discover", "cardNumber": "6011111111111117" },
-  { "cardType": "Diners Club", "cardNumber": "30569309025904" },
-  { "cardType": "JCB", "cardNumber": "3530111333300000" }
-]
+[{ "cardType": "Visa", "cardNumber": "4242424242424242" }, ...]
 ```
 
 Numbers are drawn from a curated pool of the standard processor test PANs
-(`src/sample-cards.ts`) — every one is Luhn-valid and on a real IIN range
-for its network, but they're not real accounts and authorize nothing. The
-pool is trusted as-is; nothing round-trips through the MCP server.
+(`src/sample-cards.ts`) — every one is Luhn-valid and on a real IIN range for
+its network, but they're not real accounts and authorize nothing. The pool is
+trusted as-is; nothing round-trips through the MCP server.
 
-```
-GET /sample-ibans
-```
+#### GET /sample-ibans
 
 The IBAN counterpart — one randomly chosen valid IBAN per country:
 
 ```json
-[
-  {
-    "countryCode": "DE",
-    "country": "Germany",
-    "iban": "DE89370400440532013000"
-  },
-  {
-    "countryCode": "GB",
-    "country": "United Kingdom",
-    "iban": "GB29NWBK60161331926819"
-  },
-  {
-    "countryCode": "FR",
-    "country": "France",
-    "iban": "FR1420041010050500013M02606"
-  }
-]
+[{ "countryCode": "DE", "country": "Germany", "iban": "DE89370400440532013000" }, ...]
 ```
 
-Drawn from the canonical registry example IBANs (`src/sample-ibans.ts`) —
-every one passes the mod-97 checksum and its country-specific length. Same
-trust model as `/sample-cards`: taken as-is, no MCP round-trip.
+Drawn from the canonical registry example IBANs (`src/sample-ibans.ts`) — every
+one passes the mod-97 checksum and its country-specific length. Same trust model
+as `/sample-cards`: taken as-is, no MCP round-trip.
 
-The tool-call audit log (`logs/agent.log`, same masking as the CLI) is
-shared across all requests. The `@google/adk` MCP toolset opens a fresh
-stdio child per tool call rather than holding one open; the one persistent
-MCP client is `src/mcp-ui.ts`'s, used only to resolve widget resources.
+#### GET /model-info
+
+Returns the model name for the frontend to display:
+
+```json
+{ "model": "gemini-3.5-flash-lite" }
+```
+
+### Type-checking, linting, formatting, building
+
+```bash
+pnpm run typecheck     # tsc --noEmit
+pnpm run lint          # eslint .
+pnpm run lint:fix      # eslint . --fix
+pnpm run format        # prettier --write .
+pnpm run format:check  # prettier --check .
+pnpm run build         # type-checks, then compiles to dist/
+pnpm run toc           # regenerates this README's table of contents
+```
+
+## Deploy
+
+```bash
+pnpm run deploy  # bumps the pinned MCP commit, then `railway up`
+pnpm run stop    # railway down
+```
+
+Deploys as a single Docker image (`Dockerfile`) to
+[Railway](https://railway.app). These scripts just wrap the Railway CLI, so a
+project already linked (`railway login` / `railway link`) is a prerequisite —
+`pnpm run deploy` doesn't set that up for you.
+
+The image builds `payments-toolkit-mcp` from source into the same container and
+spawns it as a stdio child process at runtime — same connection method as local
+dev, just baked into the image instead of pointing at a path on disk (see the
+"MCP connection over HTTP" TODO below for why that's still the case). The build
+pins that repo to a specific commit for reproducibility; `pnpm run deploy` runs
+`scripts/bump-mcp-commit.sh` first, which bumps the pin to its `main` HEAD, so
+every deploy picks up the latest MCP server.
+
+`GEMINI_API_KEY` and `SUPABASE_URL` are required at runtime and are
+intentionally not baked into the image — set them as Railway secrets. `PORT`
+defaults to `3001` inside the image, same as local dev.
+
+## Logging
+
+Every tool call is also logged as structured JSON to `logs/agent.log`
+(gitignored), with sensitive arguments (card numbers, IBANs) masked to their
+last 4 characters. Tail it in a readable form with:
+
+```bash
+tail -f logs/agent.log | pnpm exec pino-pretty
+```
+
+This log is for human/audit observability — the eval suite below does **not**
+read it, since the masking would hide argument details some scenarios need to
+check (see `eval/run-eval.ts`).
 
 ## Eval suite
 
-`payments-toolkit-agent`'s behavior — which tool it picks, what arguments
-it passes, how faithfully it relays a result, whether it declines or asks
-for clarification appropriately — isn't deterministic, so it's checked with
-a scenario-based eval rather than unit tests. See `eval/scenarios.ts` for
-the 12 scenarios and `eval/JOURNAL.md` for a running log of what this suite
-has actually found (and fixed) so far.
+`payments-toolkit-agent`'s behavior — which tool it picks, what arguments it
+passes, how faithfully it relays a result, whether it declines or asks for
+clarification appropriately — isn't deterministic, so it's checked with a
+scenario-based eval rather than unit tests. See `eval/scenarios.ts` for the 13
+scenarios and `eval/JOURNAL.md` for a running log of what this suite has
+actually found (and fixed) so far.
 
 Run the full suite:
 
@@ -210,22 +267,21 @@ Run the full suite:
 pnpm run eval
 ```
 
-Each scenario is graded independently on three axes — which tool(s) were
-called, whether the arguments were constructed correctly, and whether the
-final response is accurate — so a wrong-tool failure and a
-mis-relayed-result failure are distinguishable at a glance instead of
-collapsing into one pass/fail mark.
+Each scenario is graded independently on three axes — which tool(s) were called,
+whether the arguments were constructed correctly, and whether the final response
+is accurate — so a wrong-tool failure and a mis-relayed-result failure are
+distinguishable at a glance instead of collapsing into one pass/fail mark.
 
 Run a subset by scenario id, useful when checking a single fix without
 re-running (and re-paying for) the whole suite:
 
 ```bash
-pnpm run eval card-luhn-only ambiguous-clarify
+pnpm run eval card-valid-reports-brand ambiguous-clarify
 ```
 
 Each scenario runs once per invocation — a single sample of the model's
-behavior, not a guaranteed-repeatable result. Run the suite more than once
-if a failure looks surprising before treating it as a real finding.
+behavior, not a guaranteed-repeatable result. Run the suite more than once if a
+failure looks surprising before treating it as a real finding.
 
 ## Unit tests
 
@@ -235,52 +291,74 @@ pnpm run test:watch    # re-run on file changes
 pnpm run test:coverage # run once and print a coverage report
 ```
 
-These cover the deterministic logic in `src/` (event mapping, argument
-masking, prompt parsing, and the `/chat` + cancel routes via a fake
-runner) — a different, narrower concern than the eval suite above, which
-checks the agent's own decisions.
+These cover the deterministic logic in `src/` — event mapping, argument
+masking, prompt parsing, agent config (env var handling, tool/model wiring),
+sample-data pool validity, the `/chat` + cancel routes via a fake runner, and
+the `/sample-cards` + `/sample-ibans` routes (response shape, CORS) — a
+different, narrower concern than the eval suite above, which checks the agent's
+own decisions.
 
-## Project structure
+## TODO
 
-```
-src/
-  index.ts       # entry point: single-turn CLI runner
-  http.ts        # entry point: HTTP server — wires deps into createChatApp, serve()
-  app.ts         # Hono app factory: POST /chat (AG-UI/SSE) + POST /chat/:runId/cancel
-  auth.ts        # Supabase bearer-token verification (JWKS) — gates every route
-  agent.ts       # agent definition: system prompt, MCP server registration
-  trace.ts       # maps one ADK structured event to an EventOutcome (CLI, eval, and /chat)
-  ag-ui.ts       # translates EventOutcome into official AG-UI events
-  mcp-ui.ts      # resolves MCP Apps `ui://` widget resources for /chat
-  sample-cards.ts # curated valid test PANs per network, for GET /sample-cards
-  sample-ibans.ts # curated valid example IBANs per country, for GET /sample-ibans
-  logging.ts     # structured, redacted tool-call logging (logs/agent.log)
-  prompt.ts      # reads the user's prompt from argv or stdin (CLI only)
-eval/
-  scenarios.ts   # scenario-based eval set — expectations per tool/args/response
-  run-eval.ts    # eval runner: builds the agent, runs each scenario, grades it
-  JOURNAL.md     # running log of eval findings and fixes
-tests/unit/       # unit tests for the deterministic logic in src/
-```
+Tracked for later, not required for this iteration to be considered done:
 
-## Scope
+### MCP connection over HTTP
 
-This is a deliberate first iteration, not an unfinished one:
+- **Switch from a stdio child process to a network transport.** Not this agent's
+  own HTTP API — the MCP connection itself. Switch from spawning
+  `payments-toolkit-mcp` as a stdio child process to connecting over that
+  server's own `start:http` transport instead.
 
-- No frontend in this repo — backend only (CLI + HTTP/SSE), verified via
-  terminal output, curl, and logs; the frontend is a separate project
-  (`payments-toolkit-frontend`)
-- No new MCP tools — reuses the three existing ones as-is
-- No production deployment — local-first, spawns the MCP server as a child
-  process over stdio
-- No auth/guardrail system yet
-- `/chat` emits the official AG-UI protocol events, translated from the ADK
-  event stream by hand in `src/ag-ui.ts` (no TypeScript ADK↔AG-UI bridge
-  exists — the published `@ag-ui/adk` is a client for a Python middleware)
-- No multi-turn session state — each `/chat` request is a single, isolated
-  agent turn
+### AG-UI translation
 
-See the "Fast-follows" section of [PLAN.md](./PLAN.md) for what's tracked
-for later (MCP-connection-over-HTTP transport, guardrails, multi-turn
-session state, and revisiting the CLI's logging destination once it also
-becomes a long-lived service).
+- **Replace the hand-written ADK → AG-UI translation with an official bridge,
+  once one exists.** `src/ag-ui.ts` translates the ADK event stream to AG-UI
+  events by hand. No TypeScript package does this today — the published
+  `@ag-ui/adk` is just a client for a Python middleware (`ag_ui_adk`), not an
+  ADK-aware translator — so revisit this once the AG-UI project ships a real
+  TypeScript ADK integration.
+
+### Guardrails against runaway spend
+
+Now that the access gate (Supabase auth) is up, this is the spend-limit slice of
+the original "basic guardrails" work — input redaction before logging and
+explicit refusal handling for out-of-scope requests are still open too,
+unchanged:
+
+- **Per-user quota** keyed on `userId`: requests/min + requests/day, `429` when
+  exceeded. An in-memory token bucket is fine while the agent is
+  single-instance; move to a Supabase table or Redis if it ever scales out.
+- **Global circuit breaker**: cap total requests/hour, `429` when tripped.
+- **Cap `max_output_tokens`**; keep the cheap model.
+- **Google Cloud backstop**: budget alert + hard quota ceiling on
+  `generativelanguage.googleapis.com` (per-minute and per-day) — holds even if
+  everything above is bypassed.
+
+### Deployment hardening
+
+- **Lock down CORS** to the frontend's real origin — `/chat` and the sample-data
+  routes still allow `origin: '*'`.
+- **HTTPS on both sides**, so bearer tokens never transit in the clear.
+
+### Logging destination
+
+- **Move the HTTP path's audit log to stdout.** This backend is now actually
+  deployed as a long-lived HTTP service (Docker on Railway), not just a one-shot
+  CLI, so this is no longer a someday item. The Dockerfile has no `VOLUME` for
+  `logs/agent.log`: it lives on the container's writable layer, which means it's
+  invisible to Railway's log viewer (stdout/stderr only — the same reason
+  `[boot]`/`[shutdown]` lines were already moved off stderr) and lost on every
+  restart/redeploy. Switch to writing structured JSON to stdout and let Railway
+  own storage/routing, matching the MCP server's convention and the usual "app
+  emits a stream, the environment routes it" practice (this is independent of
+  the eval script, which captures its trace in-process and never read this log).
+  The CLI is short-lived per invocation, so the "lost on restart" problem
+  doesn't apply to it the same way — decide whether it keeps the file or moves
+  too, since both currently share `logging.ts`.
+
+### Eval hardening
+
+- **Repeated trials per scenario** with a pass-rate instead of a single
+  run/boolean.
+- **Upgrade the response-text axis** from heuristic checks to an LLM-as-judge,
+  if phrasing variance makes heuristics flaky in practice.

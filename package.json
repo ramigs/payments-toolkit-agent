@@ -1,6 +1,6 @@
 {
   "name": "payments-toolkit-agent",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Agent backend, built with Google ADK, exposing payments-toolkit-mcp as a conversational interface.",
   "type": "module",
   "engines": {
@@ -21,7 +21,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "deploy": "scripts/bump-mcp-commit.sh && railway up",
-    "stop": "railway down"
+    "stop": "railway down",
+    "toc": "doctoc README.md"
   },
   "keywords": [],
   "author": "",
@@ -40,6 +41,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.9.1",
     "@vitest/coverage-v8": "^4.1.11",
+    "doctoc": "^2.5.0",
     "eslint": "^10.9.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.11.0",
