@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { mcpServerEnv, verifyMcpServer } from './agent.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { verifyMcpServer, type McpConnectionConfig } from './agent.js';
 
 /**
  * The `ui-resource` payload this agent forwards to the frontend on an AG-UI
@@ -43,8 +43,8 @@ function getToolUiResourceUri(tool: {
  *
  * Kept separate from the ADK toolset's MCP access: that path is driven by
  * the model and doesn't surface tool `_meta` or expose `resources/read` to
- * us (and @google/adk@2.0.0 spawns a throwaway stdio child per tool call
- * rather than holding one open). This client is a dedicated stdio child,
+ * us (and @google/adk@2.0.0 opens a throwaway HTTP session per tool call
+ * rather than holding one open). This client is a dedicated HTTP connection,
  * connected once and held open for the life of the HTTP server, reused for
  * every resource read.
  *
@@ -61,16 +61,16 @@ export class McpUiResources {
     { mimeType: string; text: string }
   >();
 
-  async connect(mcpServerPath: string): Promise<void> {
+  async connect(config: McpConnectionConfig): Promise<void> {
     const client = new Client({
       name: 'payments-toolkit-agent-mcp-ui',
       version: '0.1.0',
     });
     await client.connect(
-      new StdioClientTransport({
-        command: 'node',
-        args: [mcpServerPath],
-        env: mcpServerEnv(),
+      new StreamableHTTPClientTransport(new URL(config.mcpServerUrl), {
+        requestInit: {
+          headers: { Authorization: `Bearer ${config.mcpAuthToken}` },
+        },
       }),
     );
     this.client = client;

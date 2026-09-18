@@ -1,6 +1,35 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { LlmAgent, MCPToolset } from '@google/adk';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { LlmAgent, MCPToolset, getLogger, setLogger } from '@google/adk';
+
+// @google/adk@2.0.0's MCPSessionManager unconditionally logs every MCP
+// transport `onerror` at `error` level (mcp_session_manager.js:
+// `transport.onerror = logTransportError`). Since it opens and closes a
+// fresh StreamableHTTPClientTransport session per tool call, closing one
+// aborts its still-open background SSE stream — and the MCP SDK reports
+// that *intentional* abort through the same `onerror` callback it'd use for
+// a real network disconnect (streamableHttp.js's read loop wraps both
+// alike). The result: a scary red "MCP transport error: SSE stream
+// disconnected: AbortError" on every single tool call, and on every
+// `/chat/:runId/cancel` too, even though nothing failed. Filtered out here
+// by message pattern rather than passed through — any other ADK log,
+// including a genuinely different transport error, still goes through
+// unchanged.
+const BENIGN_MCP_CLOSE_ABORT = /SSE stream disconnected: AbortError/;
+const defaultAdkLogger = getLogger();
+setLogger({
+  setLogLevel: (level) => defaultAdkLogger.setLogLevel(level),
+  log: (level, ...args) => defaultAdkLogger.log(level, ...args),
+  debug: (...args) => defaultAdkLogger.debug(...args),
+  info: (...args) => defaultAdkLogger.info(...args),
+  warn: (...args) => defaultAdkLogger.warn(...args),
+  error: (...args) => {
+    const isBenignCloseAbort = args.some(
+      (arg) => typeof arg === 'string' && BENIGN_MCP_CLOSE_ABORT.test(arg),
+    );
+    if (!isBenignCloseAbort) defaultAdkLogger.error(...args);
+  },
+});
 
 const MCP_SERVER_NAME = 'payments-toolkit-mcp';
 
@@ -65,39 +94,39 @@ function warnIfMissing(
   }
 }
 
-export function getMcpServerPath(): string {
-  const path = process.env.MCP_SERVER_PATH;
-  if (!path) {
-    throw new Error('MCP_SERVER_PATH is not set.');
+export function getMcpServerUrl(): string {
+  const url = process.env.MCP_SERVER_URL;
+  if (!url) {
+    throw new Error('MCP_SERVER_URL is not set.');
   }
-  return path;
+  return url;
 }
 
-/**
- * `StdioClientTransport` only forwards a curated allowlist of env vars to
- * the spawned MCP server child by default (see
- * `getDefaultEnvironment()`/`DEFAULT_INHERITED_ENV_VARS` in the MCP SDK's
- * `stdio.js`), which excludes `NODE_ENV`. Without it,
- * payments-toolkit-mcp's own `isProd` logger check is always false in the
- * child, so it always reaches for `pino-pretty` — a devDependency that
- * isn't installed in a production build. Passed as `env` to every stdio
- * spawn below so the child's production posture matches the parent's.
- */
-export function mcpServerEnv(): Record<string, string> {
-  return process.env.NODE_ENV ? { NODE_ENV: process.env.NODE_ENV } : {};
+export function getMcpAuthToken(): string {
+  const token = process.env.MCP_AUTH_TOKEN;
+  if (!token) {
+    throw new Error('MCP_AUTH_TOKEN is not set.');
+  }
+  return token;
 }
 
-export function buildAgent(mcpServerPath: string): {
+export interface McpConnectionConfig {
+  mcpServerUrl: string;
+  mcpAuthToken: string;
+}
+
+export function buildAgent(config: McpConnectionConfig): {
   agent: LlmAgent;
   mcpToolset: MCPToolset;
 } {
   const mcpToolset = new MCPToolset(
     {
-      type: 'StdioConnectionParams',
-      serverParams: {
-        command: 'node',
-        args: [mcpServerPath],
-        env: mcpServerEnv(),
+      type: 'StreamableHTTPConnectionParams',
+      url: config.mcpServerUrl,
+      transportOptions: {
+        requestInit: {
+          headers: { Authorization: `Bearer ${config.mcpAuthToken}` },
+        },
       },
     },
     [...TOOL_NAMES],
@@ -140,18 +169,23 @@ export async function verifyMcpServer(client: Client): Promise<void> {
  * Opens a throwaway MCP connection (independent of the ADK agent's own) to
  * run `verifyMcpServer` once at boot, then closes it. Used by the CLI; the
  * HTTP server runs the same check against its persistent MCP-UI client
- * instead of spawning this extra child.
+ * instead of opening this extra connection.
  */
-export async function discoverMcpServer(mcpServerPath: string): Promise<void> {
+export async function discoverMcpServer(
+  config: McpConnectionConfig,
+): Promise<void> {
   const client = new Client({
     name: 'payments-toolkit-agent-boot-check',
     version: '0.1.0',
   });
-  const transport = new StdioClientTransport({
-    command: 'node',
-    args: [mcpServerPath],
-    env: mcpServerEnv(),
-  });
+  const transport = new StreamableHTTPClientTransport(
+    new URL(config.mcpServerUrl),
+    {
+      requestInit: {
+        headers: { Authorization: `Bearer ${config.mcpAuthToken}` },
+      },
+    },
+  );
 
   try {
     await client.connect(transport);

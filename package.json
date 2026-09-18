@@ -20,7 +20,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "deploy": "scripts/bump-mcp-commit.sh && railway up",
+    "deploy": "railway up",
     "stop": "railway down",
     "toc": "doctoc README.md"
   },

@@ -1,19 +1,27 @@
 import 'dotenv/config';
 import { InMemoryRunner, toStructuredEvents } from '@google/adk';
-import { buildAgent, discoverMcpServer, getMcpServerPath } from './agent.js';
+import {
+  buildAgent,
+  discoverMcpServer,
+  getMcpServerUrl,
+  getMcpAuthToken,
+} from './agent.js';
 import { createRunLogger, logToolCall, logToolResult } from './logging.js';
 import { getPrompt } from './prompt.js';
 import { describeEvent } from './trace.js';
 
 async function main(): Promise<void> {
-  const mcpServerPath = getMcpServerPath();
+  const mcpConnection = {
+    mcpServerUrl: getMcpServerUrl(),
+    mcpAuthToken: getMcpAuthToken(),
+  };
   if (!process.env.GEMINI_API_KEY) {
     throw new Error(
       'GEMINI_API_KEY is not set. Copy .env.example to .env and set it.',
     );
   }
 
-  await discoverMcpServer(mcpServerPath);
+  await discoverMcpServer(mcpConnection);
 
   const prompt = await getPrompt();
   if (!prompt) {
@@ -22,7 +30,7 @@ async function main(): Promise<void> {
     );
   }
 
-  const { agent, mcpToolset } = buildAgent(mcpServerPath);
+  const { agent, mcpToolset } = buildAgent(mcpConnection);
   const runner = new InMemoryRunner({
     agent,
     appName: 'payments-toolkit-agent',

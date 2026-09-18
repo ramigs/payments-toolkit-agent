@@ -41,7 +41,6 @@ below.
 - [Eval suite](#eval-suite)
 - [Unit tests](#unit-tests)
 - [TODO](#todo)
-  - [MCP connection over HTTP](#mcp-connection-over-http)
   - [AG-UI translation](#ag-ui-translation)
   - [Guardrails against runaway spend](#guardrails-against-runaway-spend)
   - [Deployment hardening](#deployment-hardening)
@@ -55,8 +54,9 @@ below.
 - Node.js 20.3+ (for `AbortSignal.any`; project developed against v24, pinned
   via `.nvmrc`)
 - [pnpm](https://pnpm.io)
-- [`payments-toolkit-mcp`](https://github.com/ramigs/payments-toolkit-mcp) built
-  locally (`pnpm run build` in that repo)
+- [`payments-toolkit-mcp`](https://github.com/ramigs/payments-toolkit-mcp)
+  running locally over HTTP (`pnpm run start:http` in that repo) — this agent
+  talks to it over the network, not as a spawned child process
 - A Gemini API key (from [Google AI
   Studio](https://aistudio.google.com/app/apikey))
 - For `pnpm run start:http`: a [Supabase](https://supabase.com) project (free
@@ -79,9 +79,13 @@ Then fill in `.env`:
 
 - `GEMINI_API_KEY` — from [Google AI
   Studio](https://aistudio.google.com/app/apikey), used by Google ADK.
-- `MCP_SERVER_PATH` — the absolute path to the built MCP server's entry point,
-  e.g. `/path/to/payments-toolkit-mcp/dist/index.js` (run `pnpm run build` in
-  that repo first).
+- `MCP_SERVER_URL` — the URL to the MCP server's `/mcp` endpoint, e.g.
+  `http://localhost:3000/mcp` after running `pnpm run start:http` in that repo
+  locally, or its Railway private-network address in production (e.g.
+  `http://payments-toolkit-mcp.railway.internal:3000/mcp`).
+- `MCP_AUTH_TOKEN` — shared-secret bearer token sent to the MCP server on
+  every request; must match the value configured on that server (see its own
+  `.env.example`/`MCP_AUTH_TOKEN`).
 - `SUPABASE_URL` — required for `pnpm run start:http`: your Supabase project URL
   (Project Settings → API), e.g. `https://xxxxxxxxxxxx.supabase.co`. The HTTP
   server fetches that project's JWKS to verify the Supabase session token
@@ -216,26 +220,26 @@ pnpm run toc           # regenerates this README's table of contents
 ## Deploy
 
 ```bash
-pnpm run deploy  # bumps the pinned MCP commit, then `railway up`
+pnpm run deploy  # railway up
 pnpm run stop    # railway down
 ```
 
-Deploys as a single Docker image (`Dockerfile`) to
-[Railway](https://railway.app). These scripts just wrap the Railway CLI, so a
-project already linked (`railway login` / `railway link`) is a prerequisite —
-`pnpm run deploy` doesn't set that up for you.
+Deploys as a Docker image (`Dockerfile`) to [Railway](https://railway.app).
+This script just wraps the Railway CLI, so a project already linked
+(`railway login` / `railway link`) is a prerequisite — `pnpm run deploy`
+doesn't set that up for you.
 
-The image builds `payments-toolkit-mcp` from source into the same container and
-spawns it as a stdio child process at runtime — same connection method as local
-dev, just baked into the image instead of pointing at a path on disk (see the
-"MCP connection over HTTP" TODO below for why that's still the case). The build
-pins that repo to a specific commit for reproducibility; `pnpm run deploy` runs
-`scripts/bump-mcp-commit.sh` first, which bumps the pin to its `main` HEAD, so
-every deploy picks up the latest MCP server.
+`payments-toolkit-mcp` is deployed separately, as its own Railway service in
+the same project, reached over HTTP — see that repo's README for its own
+Dockerfile/deploy notes. This service is expected to reach it on Railway's
+private network (no public domain on the MCP service), with `MCP_SERVER_URL`
+pointed at its internal hostname and `MCP_AUTH_TOKEN` matching the value
+configured there.
 
-`GEMINI_API_KEY` and `SUPABASE_URL` are required at runtime and are
-intentionally not baked into the image — set them as Railway secrets. `PORT`
-defaults to `3001` inside the image, same as local dev.
+`GEMINI_API_KEY`, `SUPABASE_URL`, `MCP_SERVER_URL`, and `MCP_AUTH_TOKEN` are
+required at runtime and are intentionally not baked into the image — set them
+as Railway secrets. `PORT` defaults to `3001` inside the image, same as local
+dev.
 
 ## Logging
 
@@ -300,13 +304,6 @@ own decisions.
 ## TODO
 
 Tracked for later, not required for this iteration to be considered done:
-
-### MCP connection over HTTP
-
-- **Switch from a stdio child process to a network transport.** Not this agent's
-  own HTTP API — the MCP connection itself. Switch from spawning
-  `payments-toolkit-mcp` as a stdio child process to connecting over that
-  server's own `start:http` transport instead.
 
 ### AG-UI translation
 

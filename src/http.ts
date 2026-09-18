@@ -1,12 +1,15 @@
 import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { InMemoryRunner } from '@google/adk';
-import { buildAgent, getMcpServerPath } from './agent.js';
+import { buildAgent, getMcpServerUrl, getMcpAuthToken } from './agent.js';
 import { createSupabaseTokenVerifier } from './auth.js';
 import { McpUiResources } from './mcp-ui.js';
 import { APP_NAME, createChatApp } from './app.js';
 
-const mcpServerPath = getMcpServerPath();
+const mcpConnection = {
+  mcpServerUrl: getMcpServerUrl(),
+  mcpAuthToken: getMcpAuthToken(),
+};
 if (!process.env.GEMINI_API_KEY) {
   throw new Error(
     'GEMINI_API_KEY is not set. Copy .env.example to .env and set it.',
@@ -25,12 +28,13 @@ if (!process.env.SUPABASE_URL) {
 // turn, this process stays up.
 //
 // Note this does NOT keep a warm MCP connection: @google/adk@2.0.0's
-// MCPToolset/MCPTool open and close a fresh stdio connection (a new
-// `node <mcpServerPath>` child) for every tool-list resolution and every
-// individual tool call, then discard it. `mcpToolset` here only carries the
-// connection params; `mcpToolset.close()` on shutdown is a straggler cleanup.
-// The one genuinely persistent MCP client we own is `mcpUi` below.
-const { agent, mcpToolset } = buildAgent(mcpServerPath);
+// MCPToolset/MCPTool open and close a fresh HTTP session (a new
+// `initialize` handshake against the MCP service) for every tool-list
+// resolution and every individual tool call, then discard it. `mcpToolset`
+// here only carries the connection params; `mcpToolset.close()` on shutdown
+// is a straggler cleanup. The one genuinely persistent MCP client we own is
+// `mcpUi` below.
+const { agent, mcpToolset } = buildAgent(mcpConnection);
 const runner = new InMemoryRunner({
   agent,
   appName: APP_NAME,
@@ -41,10 +45,10 @@ const runner = new InMemoryRunner({
 // toolset above, this holds a single MCP client open for the life of the
 // server and reuses it for every resource read. `connect()` also runs the
 // boot-time MCP sanity check (`verifyMcpServer`) over this connection, so
-// the HTTP server doesn't spawn a separate throwaway child for it the way
-// the CLI's `discoverMcpServer` does.
+// the HTTP server doesn't open a separate throwaway connection for it the
+// way the CLI's `discoverMcpServer` does.
 const mcpUi = new McpUiResources();
-await mcpUi.connect(mcpServerPath);
+await mcpUi.connect(mcpConnection);
 
 const verifyToken = createSupabaseTokenVerifier(process.env.SUPABASE_URL);
 
