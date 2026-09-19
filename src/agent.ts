@@ -6,16 +6,19 @@ import { LlmAgent, MCPToolset, getLogger, setLogger } from '@google/adk';
 // transport `onerror` at `error` level (mcp_session_manager.js:
 // `transport.onerror = logTransportError`). Since it opens and closes a
 // fresh StreamableHTTPClientTransport session per tool call, closing one
-// aborts its still-open background SSE stream — and the MCP SDK reports
-// that *intentional* abort through the same `onerror` callback it'd use for
-// a real network disconnect (streamableHttp.js's read loop wraps both
-// alike). The result: a scary red "MCP transport error: SSE stream
-// disconnected: AbortError" on every single tool call, and on every
-// `/chat/:runId/cancel` too, even though nothing failed. Filtered out here
-// by message pattern rather than passed through — any other ADK log,
-// including a genuinely different transport error, still goes through
-// unchanged.
-const BENIGN_MCP_CLOSE_ABORT = /SSE stream disconnected: AbortError/;
+// aborts its in-flight requests — and the MCP SDK reports that
+// *intentional* abort through the same `onerror` callback it'd use for a
+// real network disconnect (streamableHttp.js has several `onerror` call
+// sites; some wrap it as "SSE stream disconnected: AbortError: This
+// operation was aborted", others just pass the bare AbortError through as
+// "This operation was aborted" — both observed in practice, hence matching
+// on the message text common to both rather than one exact phrasing). The
+// result: a scary red "MCP transport error: ..." on every single tool call,
+// and on every `/chat/:runId/cancel` too, even though nothing failed.
+// Filtered out here by message pattern rather than passed through — any
+// other ADK log, including a genuinely different transport error, still
+// goes through unchanged.
+const BENIGN_MCP_CLOSE_ABORT = /This operation was aborted/;
 const defaultAdkLogger = getLogger();
 setLogger({
   setLogLevel: (level) => defaultAdkLogger.setLogLevel(level),

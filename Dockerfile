@@ -44,9 +44,5 @@ EXPOSE 3001
 # the payments-toolkit-mcp Railway service's private network address (e.g.
 # http://payments-toolkit-mcp.railway.internal:3000/mcp), not a public URL.
 
-# src/logging.ts mkdir's <cwd>/logs on import; /app is root-owned by
-# default, so the unprivileged `node` user below needs it pre-created.
-RUN mkdir -p /app/logs && chown node:node /app/logs
-
 USER node
 CMD ["node", "dist/src/http.js"]

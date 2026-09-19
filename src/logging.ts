@@ -1,23 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
-import path from 'node:path';
 import pino from 'pino';
-
-const LOG_DIR = path.join(process.cwd(), 'logs');
-const LOG_FILE = path.join(LOG_DIR, 'agent.log');
-
-if (!existsSync(LOG_DIR)) {
-  mkdirSync(LOG_DIR, { recursive: true });
-}
 
 const level = process.env.LOG_LEVEL ?? 'info';
 
-// Unlike the MCP server's logger (stderr, pretty-printed in dev for a human
-// watching the terminal), this one is read back by the eval script — so it
-// always writes plain JSON lines to a dedicated file, regardless of
-// NODE_ENV. Pipe it through `pino-pretty` (installed as a dev dependency)
-// to view it by hand: `tail -f logs/agent.log | pnpm exec pino-pretty`.
-const logger = pino({ level }, pino.destination(LOG_FILE));
+// Structured JSON to stdout — same "app emits a stream, the environment
+// routes it" convention as payments-toolkit-mcp's own logger, and what lets
+// Railway capture/store this audit trail for both the CLI and the
+// long-lived HTTP server without a file/volume to manage. Always plain
+// JSON, regardless of NODE_ENV, rather than a pretty-printed dev transport:
+// pipe it through `pino-pretty` (installed as a dev dependency) to view it
+// by hand, e.g. `pnpm start "..." | pnpm exec pino-pretty`. Not read by the
+// eval script, which captures its trace in-process off the runner's event
+// stream directly (see eval/run-eval.ts) and never touches this log.
+const logger = pino({ level });
 
 /**
  * A logger scoped to one CLI invocation (one `pnpm start` call), so log

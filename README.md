@@ -44,7 +44,6 @@ below.
   - [AG-UI translation](#ag-ui-translation)
   - [Guardrails against runaway spend](#guardrails-against-runaway-spend)
   - [Deployment hardening](#deployment-hardening)
-  - [Logging destination](#logging-destination)
   - [Eval hardening](#eval-hardening)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -243,12 +242,14 @@ dev.
 
 ## Logging
 
-Every tool call is also logged as structured JSON to `logs/agent.log`
-(gitignored), with sensitive arguments (card numbers, IBANs) masked to their
-last 4 characters. Tail it in a readable form with:
+Every tool call is also logged as structured JSON to stdout (`src/logging.ts`),
+with sensitive arguments (card numbers, IBANs) masked to their last 4
+characters — Railway captures/routes it from there, no file or volume to
+manage. Pipe it through `pino-pretty` (a dev dependency) to read it by hand,
+e.g.:
 
 ```bash
-tail -f logs/agent.log | pnpm exec pino-pretty
+pnpm start "Is 4242424242424242 a valid card number?" | pnpm exec pino-pretty
 ```
 
 This log is for human/audit observability — the eval suite below does **not**
@@ -335,22 +336,6 @@ unchanged:
 - **Lock down CORS** to the frontend's real origin — `/chat` and the sample-data
   routes still allow `origin: '*'`.
 - **HTTPS on both sides**, so bearer tokens never transit in the clear.
-
-### Logging destination
-
-- **Move the HTTP path's audit log to stdout.** This backend is now actually
-  deployed as a long-lived HTTP service (Docker on Railway), not just a one-shot
-  CLI, so this is no longer a someday item. The Dockerfile has no `VOLUME` for
-  `logs/agent.log`: it lives on the container's writable layer, which means it's
-  invisible to Railway's log viewer (stdout/stderr only — the same reason
-  `[boot]`/`[shutdown]` lines were already moved off stderr) and lost on every
-  restart/redeploy. Switch to writing structured JSON to stdout and let Railway
-  own storage/routing, matching the MCP server's convention and the usual "app
-  emits a stream, the environment routes it" practice (this is independent of
-  the eval script, which captures its trace in-process and never read this log).
-  The CLI is short-lived per invocation, so the "lost on restart" problem
-  doesn't apply to it the same way — decide whether it keeps the file or moves
-  too, since both currently share `logging.ts`.
 
 ### Eval hardening
 
