@@ -4,8 +4,8 @@ Payments Toolkit is a validation assistant for **card numbers** and **IBANs**.
 Ask in plain English — it checks card numbers (Luhn checksum and card network)
 and IBANs (format, country length, checksum) by running real validators.
 
-Learn more: [What I learned building my first end-to-end AI
-app](https://ramigs.dev/blog/what-i-learned-building-my-first-end-to-end-ai-app/)
+Learn more: [A validation assistant built on MCP, AG-UI, and MCP
+Apps](https://ramigs.dev/blog/a-validation-assistant-built-on-mcp-ag-ui-and-mcp-apps/)
 
 This is the agent backend, built with [Google
 ADK](https://google.github.io/adk-docs/), that connects to
@@ -22,7 +22,8 @@ below.
 
 <!-- START doctoc generated TOC please keep comment here to allow auto update -->
 <!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
-**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+**Table of Contents** _generated with [DocToc](https://github.com/thlorenz/doctoc)_
 
 - [Prerequisites](#prerequisites)
 - [Setup](#setup)
@@ -97,7 +98,18 @@ Then fill in `.env`:
 ## Usage
 
 There are two ways to run the agent: a single-turn CLI call (below), or a
-long-lived HTTP server for the frontend to talk to.
+long-lived HTTP server for the frontend to talk to. Either way,
+`payments-toolkit-mcp` has to be running first (see Prerequisites) — to start
+both at once for local dev:
+
+```bash
+pnpm run dev
+```
+
+Runs `payments-toolkit-mcp`'s `start:http` alongside this repo's own
+`start:http`, labeled/colored via `concurrently`. Assumes
+`payments-toolkit-mcp` is checked out as a sibling directory
+(`../payments-toolkit-mcp`); override with `MCP_REPO_PATH` if it's elsewhere.
 
 ### CLI
 

@@ -10,6 +10,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "start:http": "tsx src/http.ts",
+    "dev": "concurrently -n mcp,agent -c blue,green \"pnpm --dir ${MCP_REPO_PATH:-../payments-toolkit-mcp} run start:http\" \"pnpm run start:http\"",
     "build": "tsc",
     "eval": "tsx eval/run-eval.ts",
     "test": "vitest run",
@@ -41,6 +42,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.9.1",
     "@vitest/coverage-v8": "^4.1.11",
+    "concurrently": "^10.0.5",
     "doctoc": "^2.5.0",
     "eslint": "^10.9.0",
     "eslint-config-prettier": "^10.1.8",
